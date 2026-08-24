@@ -208,26 +208,29 @@ class Generator{
                     generator->generateScope(scopeNode->statements);
                 }
                 void operator()(const ConditionalNode* conditionalNode) {
+                    int endLabel = generator->m_curLabelCount++;
+
                     for (int i = 0; i < conditionalNode->statements.size(); ++i) {
                         // If an Else Statement
                         if(i == conditionalNode->condition.size()) {
                             generator->generateScope(conditionalNode->statements[i]);
                         }
                         else {
+                            int curLabel = generator->m_curLabelCount++;
+
                             generator->generateExpression(conditionalNode->condition[i]);
                             generator->pop("rax");
                             generator->m_output << "    cmp rax, 1\n";
-                            generator->m_output << "    jl a" << generator->m_curLabelCount + i << "\n";
+                            generator->m_output << "    jl a" << curLabel << "\n";
 
                             generator->generateScope(conditionalNode->statements[i]);
 
-                            generator->m_output << "    jmp a" << generator->m_curLabelCount + conditionalNode->statements.size() - 1 << "\n";
+                            generator->m_output << "    jmp a" << endLabel << "\n";
 
-                            generator->m_output << "a" << generator->m_curLabelCount + i << ":\n";
+                            generator->m_output << "a" << curLabel << ":\n";
                         }
                     }
-                    generator->m_output << "a" << generator->m_curLabelCount + conditionalNode->statements.size() - 1 << ":\n";
-                    generator->m_curLabelCount += conditionalNode->statements.size();
+                    generator->m_output << "a" << endLabel << ":\n";
                 }
                 void operator()(const LoopNode* loopNode) {
                     int statementLabel = generator->m_curLabelCount++;
