@@ -62,9 +62,8 @@ struct ScopeNode {
 };
 
 struct ConditionalNode {
-    ExpressionNode* condition;
-    std::vector<StatementNode*> trueStatements = {};
-    std::vector<StatementNode*> falseStatements = {};
+    std::vector<ExpressionNode*> condition = {};
+    std::vector<std::vector<StatementNode*>> statements = {};
 };
 
 struct LoopNode {
@@ -398,12 +397,34 @@ class Parser {
                 auto conditionalNode = m_ArenaAllocator.allocate<ConditionalNode>();
 
                 if(auto condition = parseExpression()) {
-                    conditionalNode->condition = condition.value();
+                    conditionalNode->condition.push_back(condition.value());
 
                     if(tryPeek(TokenType::openCurlyBrace)) {
                         consume();
 
-                        conditionalNode->trueStatements = parseScope().value();
+                        conditionalNode->statements.push_back(parseScope().value());
+
+                        while(tryPeek(TokenType::elseIfStatement)) {
+                            consume();
+
+                            if(auto condition = parseExpression()) {
+                                conditionalNode->condition.push_back(condition.value());
+
+                                if(tryPeek(TokenType::openCurlyBrace)) {
+                                    consume();
+
+                                    conditionalNode->statements.push_back(parseScope().value());
+                                }
+                                else {
+                                    std::cerr << "Expected '{'" << std::endl;
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                            else {
+                                std::cerr << "Expected Expression" << std::endl;
+                                exit(EXIT_FAILURE);
+                            }
+                        }
 
                         if(tryPeek(TokenType::elseStatement)) {
                             consume();
@@ -411,7 +432,7 @@ class Parser {
                             if(tryPeek(TokenType::openCurlyBrace)) {
                                 consume();
 
-                                conditionalNode->falseStatements = parseScope().value();
+                                conditionalNode->statements.push_back(parseScope().value());
                             }
                             else {
                                 std::cerr << "Expected '{'" << std::endl;

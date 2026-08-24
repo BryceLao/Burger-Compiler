@@ -180,7 +180,7 @@ class Generator{
                 void operator()(const PrintNode* printNode) const {
                     generator->generateExpression(printNode->expression);
 
-
+                    generator->m_output << "    call printInt\n";
                 }
                 void operator()(const DeclarationNode* declarationNode) const {
                     if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
@@ -208,21 +208,26 @@ class Generator{
                     generator->generateScope(scopeNode->statements);
                 }
                 void operator()(const ConditionalNode* conditionalNode) {
-                    generator->generateExpression(conditionalNode->condition);
-                    generator->pop("rax");
-                    generator->m_output << "    cmp rax, 1\n";
-                    generator->m_output << "    jl a" << generator->m_curLabelCount << "\n";
+                    for (int i = 0; i < conditionalNode->statements.size(); ++i) {
+                        // If an Else Statement
+                        if(i == conditionalNode->condition.size()) {
+                            generator->generateScope(conditionalNode->statements[i]);
+                        }
+                        else {
+                            generator->generateExpression(conditionalNode->condition[i]);
+                            generator->pop("rax");
+                            generator->m_output << "    cmp rax, 1\n";
+                            generator->m_output << "    jl a" << generator->m_curLabelCount + i << "\n";
 
-                    generator->generateScope(conditionalNode->trueStatements);
+                            generator->generateScope(conditionalNode->statements[i]);
 
-                    if(!conditionalNode->falseStatements.empty()) {
-                        generator->m_output << "    jmp a" << generator->m_curLabelCount + 1 << "\n";
+                            generator->m_output << "    jmp a" << generator->m_curLabelCount + conditionalNode->statements.size() - 1 << "\n";
 
-                        generator->m_output << "a" << generator->m_curLabelCount++ << ":\n";
-                        generator->generateScope(conditionalNode->falseStatements);
+                            generator->m_output << "a" << generator->m_curLabelCount + i << ":\n";
+                        }
                     }
-
-                    generator->m_output << "a" << generator->m_curLabelCount++ << ":\n";
+                    generator->m_output << "a" << generator->m_curLabelCount + conditionalNode->statements.size() - 1 << ":\n";
+                    generator->m_curLabelCount += conditionalNode->statements.size();
                 }
                 void operator()(const LoopNode* loopNode) {
                     int statementLabel = generator->m_curLabelCount++;
@@ -251,7 +256,7 @@ class Generator{
         }
 
         [[nodiscard]] std::string generateProgram() {
-            m_output << "global _start\n_start:\n";
+            m_output << "section .text\nglobal _start\n_start:\n";
 
             for(const StatementNode* statement : m_program.statements) {
                 generateStatement(statement);
@@ -259,10 +264,50 @@ class Generator{
 
             m_output << "    mov rax, 60\n";
             m_output << "    mov rdi, 0\n";
-            m_output << "    syscall";
+            m_output << "    syscall\n";
+
+            generateUtil();
 
             return m_output.str();
         }
+
+        void generateUtil() {
+            m_output << "\n\n\n ; Util Functions \n\n\n";
+
+            m_output << "printInt:\n"
+                        "   mov rbx, 1\n"
+                        "   mov rax, 10\n"   // New Line Character
+                        "   push rax\n"
+                        "   mov rax, [rsp + 16]\n"
+                        "   mov rcx, 10\n"
+                        "   \n"
+                        "   divLoop:\n"
+                        "      xor rdx, rdx\n"
+                        "      div rcx\n"
+                        "      add rbx, 1\n"
+                        "      add rdx, '0'\n"
+                        "      push rdx\n"
+                        "      cmp rax, 0\n"
+                        "      jg divLoop\n"
+                        "   \n"
+                        "   printLoop:\n"
+                        "      call printASCII\n"
+                        "      pop rax\n"
+                        "      sub rbx, 1\n"
+                        "      cmp rbx, 0\n"
+                        "      jg printLoop\n"
+                        "   \n"
+                        "   ret\n"
+                        "\n"
+                        "printASCII:\n"
+                        "   mov rax, 1\n"
+                        "   mov rdi, 1\n"
+                        "   lea rsi, [rsp + 8]\n"
+                        "   mov rdx, 1\n"
+                        "   syscall\n"
+                        "   ret\n";
+        }
+
     private:
         void push(const std::string& reg) {
             m_output << "    push " << reg << "\n";
