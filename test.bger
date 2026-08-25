@@ -1,18 +1,15 @@
-set x = 5;
+set int x = 1;
+set bool y = True;
 
-if x == 1 {
-    set y = 2;
+if x {
+    print(1);
 
-    while x > 3 {
-        y = y * 2;
-        x = x - 1;
+    y = False;
+
+    if y == False {
+        print(y);
     }
-
-    print(y);
-}
-else if 1 == 2 {
-    print(222);
 }
 else {
-    print(111);
+    print(2);
 }

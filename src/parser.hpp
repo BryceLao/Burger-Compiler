@@ -1,12 +1,18 @@
 #pragma once
 
 #include <variant>
+#include <unordered_map>
 
 #include "tokenizer.hpp"
 #include "arenaAllocator.hpp"
 
-struct IntLiteralTerm {
-    Token intLiteral;
+enum class DataType {
+    Integer,
+    Boolean
+};
+
+struct LiteralTerm {
+    Token literal;
 };
 
 struct IdentifierTerm {
@@ -30,10 +36,12 @@ struct DummyTerm {
 };
 
 struct TermExpressionNode {
-    std::variant<IntLiteralTerm*,IdentifierTerm*, ParenthesisTerm*, DummyTerm*> variant;
+    DataType type;
+    std::variant<LiteralTerm*,IdentifierTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
 struct ExpressionNode {
+    DataType type;
     std::variant<TermExpressionNode*, OperationExpressionNode*> variant;
 };
 
@@ -49,6 +57,7 @@ struct PrintNode {
 
 struct DeclarationNode {
     Token identifier;
+    DataType type;
     ExpressionNode* expression;
 };
 
@@ -87,11 +96,22 @@ class Parser {
 
         std::optional<TermExpressionNode*> parseTerm() {
             if(tryPeek(TokenType::intLiteral)) {
-                auto intLiteralExpression = m_ArenaAllocator.allocate<IntLiteralTerm>();
-                intLiteralExpression->intLiteral = consume();
+                auto literalExpression = m_ArenaAllocator.allocate<LiteralTerm>();
+                literalExpression->literal = consume();
 
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
-                termExpression->variant = intLiteralExpression;
+                termExpression->variant = literalExpression;
+                termExpression->type = DataType::Integer;
+
+                return termExpression;
+            }
+            else if(tryPeek(TokenType::boolLiteral)) {
+                auto literalExpression = m_ArenaAllocator.allocate<LiteralTerm>();
+                literalExpression->literal = consume();
+
+                auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                termExpression->variant = literalExpression;
+                termExpression->type = DataType::Boolean;
 
                 return termExpression;
             }
@@ -101,6 +121,7 @@ class Parser {
 
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = identifierTerm;
+                termExpression->type = m_variables[identifierTerm->identifier.value.value()];
 
                 return termExpression;
             }
@@ -125,6 +146,7 @@ class Parser {
 
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = parenthesisTerm;
+                termExpression->type = expression.value()->type;
 
                 return termExpression;
             }
@@ -149,6 +171,7 @@ class Parser {
 
             ExpressionNode* left = m_ArenaAllocator.allocate<ExpressionNode>();
             left->variant = term.value();
+            left->type = term.value()->type;
 
             while(true) {
                 if(!peek().has_value()) break;
@@ -208,6 +231,7 @@ class Parser {
                         break;
                     case TokenType::notOperator:
                         operationExpression->_operator = TokenType::notOperator;
+                        left->type = right.value()->type;
                         break;
                     case TokenType::andOperator:
                         operationExpression->_operator = TokenType::andOperator;
@@ -223,10 +247,18 @@ class Parser {
                 auto temp = m_ArenaAllocator.allocate<ExpressionNode>(); //Prevents pointer loop
 
                 temp->variant = left->variant;
+                temp->type = left->type;
+
                 operationExpression->left = temp;
                 operationExpression->right = right.value();
 
                 left->variant = operationExpression;
+                left->type = temp->type;
+
+                if(left->type != right.value()->type) {
+                    std::cerr << "DataType Mismatch" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
             }
 
             return left;
@@ -318,15 +350,35 @@ class Parser {
 
                 return statementNode;
             }
-            else if(tryPeek(TokenType::set) && tryPeek(TokenType::identifier, 1) && tryPeek(TokenType::assignment, 2)) {
+            else if(tryPeek(TokenType::set) && tryPeek(TokenType::identifier, 2) && tryPeek(TokenType::assignment, 3)) {
                 consume();
 
                 auto declarationNode = m_ArenaAllocator.allocate<DeclarationNode>();
+
+                switch(peek().value().type) {
+                    case TokenType::intType:
+                        declarationNode->type = DataType::Integer;
+                        consume();
+                        break;
+                    case TokenType::boolType:
+                        declarationNode->type = DataType::Boolean;
+                        consume();
+                        break;
+                    default:
+                        std::cerr << "Expected DataType Identifier" << std::endl;
+                        exit(EXIT_FAILURE);
+                }
+
                 declarationNode->identifier = consume();
 
                 consume();
 
                 if(auto expressionNode = parseExpression()) {
+                    if(declarationNode->type != expressionNode.value()->type) {
+                        std::cerr << "Variable DataType and Expression DataType Do Not Match" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
                     declarationNode->expression = expressionNode.value();
                 }
                 else {
@@ -339,6 +391,8 @@ class Parser {
 
                     auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                     statementNode->variant = declarationNode;
+
+                    m_variables[declarationNode->identifier.value.value()] = declarationNode->type;
 
                     return statementNode;
                 }
@@ -507,6 +561,7 @@ class Parser {
         const std::vector<Token> m_Tokens;
         size_t m_Index = 0;
         ArenaAllocator m_ArenaAllocator;
+        std::unordered_map<std::string, DataType> m_variables;
 
         [[nodiscard]] inline bool tryPeek(TokenType type, int ahead = 0) const {
             if(m_Index + ahead >= m_Tokens.size()) return false;

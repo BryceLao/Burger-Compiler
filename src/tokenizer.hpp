@@ -7,6 +7,9 @@ enum class TokenType {
     exit,
     print,
     intLiteral,
+    intType,
+    boolLiteral,
+    boolType,
     identifier,
     set,
     assignment,
@@ -97,6 +100,22 @@ class Tokenizer {
                     }
                     else if(buffer == "set") {
                         tokens.push_back({.type = TokenType::set});
+                        buffer.clear();
+                    }
+                    else if(buffer == "int") {
+                        tokens.push_back({.type = TokenType::intType});
+                        buffer.clear();
+                    }
+                    else if(buffer == "bool") {
+                        tokens.push_back({.type = TokenType::boolType});
+                        buffer.clear();
+                    }
+                    else if(buffer == "True") {
+                        tokens.push_back({.type = TokenType::boolLiteral, .value = "1"});
+                        buffer.clear();
+                    }
+                    else if(buffer == "False") {
+                        tokens.push_back({.type = TokenType::boolLiteral, .value = "0"});
                         buffer.clear();
                     }
                     else if(buffer == "if") {

@@ -9,6 +9,7 @@
 #include "./generator.hpp"
 
 int main(int argc, char* argv[]) {
+
     if(argc != 2) {
         std::cerr << "Incorrect amount of arguments passed" << std::endl;
         std::cerr << "burger <input.bger>" << std::endl;

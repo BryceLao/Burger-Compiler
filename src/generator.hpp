@@ -13,8 +13,8 @@ class Generator{
             struct TermVisitor {
                 Generator* generator;
 
-                void operator()(const IntLiteralTerm* expressionNodeIntLiteral) const {
-                    generator->m_output << "    mov rax, " << expressionNodeIntLiteral->intLiteral.value.value() << "\n";
+                void operator()(const LiteralTerm* expressionNodeLiteral) const {
+                    generator->m_output << "    mov rax, " << expressionNodeLiteral->literal.value.value() << "\n";
                     generator->push("rax");
                 }
                 void operator()(const IdentifierTerm* expressionNodeIdentifier) const {
@@ -173,6 +173,12 @@ class Generator{
                 void operator()(const ExitNode* exitNode) const {
                     generator->generateExpression(exitNode->expression);
 
+                    // Exit Code can only be a natural number
+                    if(exitNode->expression->type != DataType::Integer) {
+                        std::cerr << "Argument Must Be A Positive Integer" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
                     generator->m_output << "    mov rax, 60\n";
                     generator->pop("rdi");
                     generator->m_output << "    syscall\n";
@@ -180,7 +186,17 @@ class Generator{
                 void operator()(const PrintNode* printNode) const {
                     generator->generateExpression(printNode->expression);
 
-                    generator->m_output << "    call printInt\n";
+                    switch(printNode->expression->type) {
+                        case DataType::Integer:
+                            generator->m_output << "    call printInt\n";
+                            break;
+                        case DataType::Boolean:
+                            generator->m_output << "    call printBool\n";
+                            break;
+                        default:
+                            std::cerr << "Unknown Data Type" << std::endl;
+                            exit(EXIT_FAILURE);
+                    }
                 }
                 void operator()(const DeclarationNode* declarationNode) const {
                     if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
@@ -259,11 +275,19 @@ class Generator{
         }
 
         [[nodiscard]] std::string generateProgram() {
+            generateData();
+
             m_output << "section .text\nglobal _start\n_start:\n";
 
             for(const StatementNode* statement : m_program.statements) {
                 generateStatement(statement);
             }
+
+            m_output << "      mov rax, 1\n"
+                        "      mov rdi, 1\n"
+                        "      mov rsi, exitMsg\n"
+                        "      mov rdx, 32\n"
+                        "      syscall\n";
 
             m_output << "    mov rax, 60\n";
             m_output << "    mov rdi, 0\n";
@@ -272,6 +296,15 @@ class Generator{
             generateUtil();
 
             return m_output.str();
+        }
+
+        void generateData() {
+            m_output << "section .data\n"
+                        "   exitMsg db \"Process finished with exit code \"\n"
+                        "   trueString db \"True\"\n"
+                        "   falseString db \"False\"\n"
+                        "   newLine db 10\n"
+                        "\n";
         }
 
         void generateUtil() {
@@ -308,7 +341,31 @@ class Generator{
                         "   lea rsi, [rsp + 8]\n"
                         "   mov rdx, 1\n"
                         "   syscall\n"
-                        "   ret\n";
+                        "   ret\n\n";
+
+            m_output << "printBool:\n"
+                        "   mov rax, 1\n"
+                        "   mov rdi, 1\n"
+                        "   mov rsi, [rsp + 8]\n"
+                        "   cmp rsi, 0\n"
+                        "   je falseStatement\n"
+                        "   trueStatement:\n"
+                        "      mov rsi, trueString\n"
+                        "      mov rdx, 4\n"
+                        "      jmp endFunction\n"
+                        "   falseStatement:\n"
+                        "      mov rsi, falseString\n"
+                        "      mov rdx, 5\n"
+                        "   endFunction:\n"
+                        "      syscall\n"
+                        "      mov rax, 1\n"
+                        "      mov rdi, 1\n"
+                        "      mov rsi, newLine\n"
+                        "      mov rdx, 1\n"
+                        "      syscall\n"
+                        "   \n"
+                        "   ret\n"
+                        "   ";
         }
 
     private:
