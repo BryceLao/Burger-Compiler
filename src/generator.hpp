@@ -120,12 +120,12 @@ class Generator{
                                 break;
                             case (TokenType::andOperator):
                                 //Converts Non-Zero Integers as True booleans
-                                generator->m_output << "    cmp rax, 1\n";
-                                generator->m_output << "    setge al\n";
+                                generator->m_output << "    cmp rax, 0\n";
+                                generator->m_output << "    setne al\n";
                                 generator->m_output << "    movzx rax, al\n";
 
-                                generator->m_output << "    cmp rbx, 1\n";
-                                generator->m_output << "    setge bl\n";
+                                generator->m_output << "    cmp rbx, 0\n";
+                                generator->m_output << "    setne bl\n";
                                 generator->m_output << "    movzx rbx, bl\n";
 
                                 generator->m_output << "    add rax, rbx\n";
@@ -137,12 +137,12 @@ class Generator{
                                 break;
                             case (TokenType::orOperator):
                                 //Converts Non-Zero Integers as True booleans
-                                generator->m_output << "    cmp rax, 1\n";
-                                generator->m_output << "    setge al\n";
+                                generator->m_output << "    cmp rax, 0\n";
+                                generator->m_output << "    setne al\n";
                                 generator->m_output << "    movzx rax, al\n";
 
-                                generator->m_output << "    cmp rbx, 1\n";
-                                generator->m_output << "    setge bl\n";
+                                generator->m_output << "    cmp rbx, 0\n";
+                                generator->m_output << "    setne bl\n";
                                 generator->m_output << "    movzx rbx, bl\n";
 
                                 generator->m_output << "    add rax, rbx\n";
@@ -193,6 +193,9 @@ class Generator{
                         case DataType::Boolean:
                             generator->m_output << "    call printBool\n";
                             break;
+                        case DataType::Character:
+                            generator->m_output << "    call printChar\n";
+                            break;
                         default:
                             std::cerr << "Unknown Data Type" << std::endl;
                             exit(EXIT_FAILURE);
@@ -205,8 +208,15 @@ class Generator{
                     }
 
                     generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
-                                                                                                        .stackLocation = generator->m_stackSize}});
+                                                                                                        .stackLocation = generator->m_stackSize,
+                                                                                                        .type = declarationNode->type}});
+
                     generator->generateExpression(declarationNode->expression);
+                    generator->pop("rax");
+
+                    generator->boundVariable(declarationNode->type);
+
+                    generator->push("rax");
                 }
                 void operator()(const ReAssignmentNode* reAssignmentNode) const {
                     if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value())) {
@@ -216,6 +226,8 @@ class Generator{
 
                     generator->generateExpression(reAssignmentNode->expression);
                     generator->pop("rax");
+
+                    generator->boundVariable(generator->m_variables[reAssignmentNode->identifier.value.value()].type);
 
                     size_t stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
                     generator->m_output << "    mov [rsp + " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "], rax\n";
@@ -236,8 +248,8 @@ class Generator{
 
                             generator->generateExpression(conditionalNode->condition[i]);
                             generator->pop("rax");
-                            generator->m_output << "    cmp rax, 1\n";
-                            generator->m_output << "    jl a" << curLabel << "\n";
+                            generator->m_output << "    cmp rax, 0\n";
+                            generator->m_output << "    je a" << curLabel << "\n";
 
                             generator->generateScope(conditionalNode->statements[i]);
 
@@ -265,8 +277,8 @@ class Generator{
                     generator->pop("rax");
 
                     //If condition is true jump back to statement label
-                    generator->m_output << "    cmp rax, 1\n";
-                    generator->m_output << "    jge a" << statementLabel << "\n";
+                    generator->m_output << "    cmp rax, 0\n";
+                    generator->m_output << "    jne a" << statementLabel << "\n";
                 }
             };
 
@@ -365,7 +377,36 @@ class Generator{
                         "      syscall\n"
                         "   \n"
                         "   ret\n"
-                        "   ";
+                        "   \n";
+
+            m_output << "printChar:\n"
+                        "   mov rax, 1\n"
+                        "   mov rdi, 1\n"
+                        "   lea rsi, [rsp + 8]\n"
+                        "   mov rdx, 1\n"
+                        "   syscall\n"
+                        "   mov rax, 1\n"
+                        "   mov rdi, 1\n"
+                        "   mov rsi, newLine\n"
+                        "   mov rdx, 1\n"
+                        "   syscall\n"
+                        "   ret\n\n";
+
+            m_output << "boundBool:\n"
+                        "   cmp rax, 0\n"
+                        "   setne al\n"
+                        "   movzx rax, al\n";
+
+            m_output << "boundChar:\n"
+                        "   mov rbx, 128\n"
+                        "   cqo\n"
+                        "   idiv rbx\n"
+                        "   test rdx, rdx\n"
+                        "   jns doneDividing\n"
+                        "   add rdx, 128\n"
+                        "   doneDividing:\n"
+                        "      mov rax, rdx\n"
+                        "   ret\n";
         }
 
     private:
@@ -399,9 +440,25 @@ class Generator{
             m_scopeDepth--;
         }
 
+        void boundVariable(DataType type) {
+            switch(type) {
+                case DataType::Integer:
+                    break;
+                case DataType::Boolean:
+                    m_output << "   call boundBool\n";
+                    break;
+                case DataType::Character:
+                    m_output << "   call boundChar\n";
+                    break;
+                default:
+                    break;
+            }
+        }
+
         struct Variable{
             int scopeDepth;
             size_t stackLocation;
+            DataType type;
         };
 
         const ProgramNode m_program;

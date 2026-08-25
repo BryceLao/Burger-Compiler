@@ -1,15 +1,5 @@
-set int x = 1;
-set bool y = True;
+set char x = 1;
 
-if x {
-    print(1);
+x = x - 31;
 
-    y = False;
-
-    if y == False {
-        print(y);
-    }
-}
-else {
-    print(2);
-}
+print(x);

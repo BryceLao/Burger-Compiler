@@ -8,7 +8,8 @@
 
 enum class DataType {
     Integer,
-    Boolean
+    Boolean,
+    Character
 };
 
 struct LiteralTerm {
@@ -112,6 +113,16 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = literalExpression;
                 termExpression->type = DataType::Boolean;
+
+                return termExpression;
+            }
+            else if(tryPeek(TokenType::charLiteral)) {
+                auto literalExpression = m_ArenaAllocator.allocate<LiteralTerm>();
+                literalExpression->literal = consume();
+
+                auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                termExpression->variant = literalExpression;
+                termExpression->type = DataType::Character;
 
                 return termExpression;
             }
@@ -247,17 +258,21 @@ class Parser {
                 auto temp = m_ArenaAllocator.allocate<ExpressionNode>(); //Prevents pointer loop
 
                 temp->variant = left->variant;
-                temp->type = left->type;
 
                 operationExpression->left = temp;
                 operationExpression->right = right.value();
 
                 left->variant = operationExpression;
-                left->type = temp->type;
 
-                if(left->type != right.value()->type) {
-                    std::cerr << "DataType Mismatch" << std::endl;
-                    exit(EXIT_FAILURE);
+                auto _operator = operationExpression->_operator;
+                if(_operator == TokenType::addition || _operator == TokenType::subtraction || _operator == TokenType::multiplication
+                || _operator == TokenType::division || _operator == TokenType::modulo) {
+                    left->type = DataType::Integer;
+                }
+                else if(_operator == TokenType::equalTo || _operator == TokenType::notEqualTo || _operator == TokenType::lessThan
+                || _operator == TokenType::lessThanOrEqual || _operator == TokenType::greaterThan || _operator == TokenType::greaterThanOrEqual
+                || _operator == TokenType::notOperator || _operator == TokenType::andOperator || _operator == TokenType::orOperator) {
+                    left->type = DataType::Boolean;
                 }
             }
 
@@ -358,27 +373,25 @@ class Parser {
                 switch(peek().value().type) {
                     case TokenType::intType:
                         declarationNode->type = DataType::Integer;
-                        consume();
                         break;
                     case TokenType::boolType:
                         declarationNode->type = DataType::Boolean;
-                        consume();
+                        break;
+                    case TokenType::charType:
+                        declarationNode->type = DataType::Character;
                         break;
                     default:
                         std::cerr << "Expected DataType Identifier" << std::endl;
                         exit(EXIT_FAILURE);
                 }
 
+                consume();
+
                 declarationNode->identifier = consume();
 
                 consume();
 
                 if(auto expressionNode = parseExpression()) {
-                    if(declarationNode->type != expressionNode.value()->type) {
-                        std::cerr << "Variable DataType and Expression DataType Do Not Match" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
-
                     declarationNode->expression = expressionNode.value();
                 }
                 else {

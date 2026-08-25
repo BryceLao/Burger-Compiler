@@ -10,6 +10,8 @@ enum class TokenType {
     intType,
     boolLiteral,
     boolType,
+    charLiteral,
+    charType,
     identifier,
     set,
     assignment,
@@ -110,6 +112,10 @@ class Tokenizer {
                         tokens.push_back({.type = TokenType::boolType});
                         buffer.clear();
                     }
+                    else if(buffer == "char") {
+                        tokens.push_back({.type = TokenType::charType});
+                        buffer.clear();
+                    }
                     else if(buffer == "True") {
                         tokens.push_back({.type = TokenType::boolLiteral, .value = "1"});
                         buffer.clear();
@@ -201,6 +207,11 @@ class Tokenizer {
 
                     tokens.push_back({.type = TokenType::notEqualTo});
                 }
+                else if(c == '\'' && tryPeek('\'',2)) {
+                    consume();
+                    tokens.push_back({.type = TokenType::charLiteral, .value = std::to_string(static_cast<int>(peek().value()))});
+                    consume(); consume();
+                }
                 else {
                     switch(c) {
                         case '(':
@@ -244,7 +255,7 @@ class Tokenizer {
                             consume();
                             break;
                         default:
-                            std::cerr << "Invalid a" << std::endl;
+                            std::cerr << "Invalid Syntax" << std::endl;
                             exit(EXIT_FAILURE);
                     }
                 }
