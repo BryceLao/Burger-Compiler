@@ -76,7 +76,7 @@ struct Token {
 class Tokenizer {
     public:
         inline explicit Tokenizer(const std::string& src):
-            m_src(std::move(src)) {}
+            m_src(src + "\n") {}
 
         std::vector<Token> tokenize() {
             std::vector<Token> tokens;
@@ -207,10 +207,27 @@ class Tokenizer {
 
                     tokens.push_back({.type = TokenType::notEqualTo});
                 }
-                else if(c == '\'' && tryPeek('\'',2)) {
+                else if(c == '\'') {
+                    if(!tryPeek('\'',2)) {
+                        std::cerr << "Expected '" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
                     consume();
                     tokens.push_back({.type = TokenType::charLiteral, .value = std::to_string(static_cast<int>(peek().value()))});
                     consume(); consume();
+                }
+                else if(c == '/') {
+                    consume();
+
+                    if(tryPeek('/'))  {
+                        consume();
+
+                        while(!tryPeek('\n') && !tryPeek('\r')) {
+                            consume();
+                        }
+                    }
+                    else tokens.push_back({.type = TokenType::division});
                 }
                 else {
                     switch(c) {
@@ -236,10 +253,6 @@ class Tokenizer {
                             break;
                         case '*':
                             tokens.push_back({.type = TokenType::multiplication});
-                            consume();
-                            break;
-                        case '/':
-                            tokens.push_back({.type = TokenType::division});
                             consume();
                             break;
                         case '%':

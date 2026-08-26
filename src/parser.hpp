@@ -9,7 +9,8 @@
 enum class DataType {
     Integer,
     Boolean,
-    Character
+    Character,
+    None
 };
 
 struct LiteralTerm {
@@ -38,6 +39,7 @@ struct DummyTerm {
 
 struct TermExpressionNode {
     DataType type;
+    bool isNegative;
     std::variant<LiteralTerm*,IdentifierTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
@@ -176,9 +178,29 @@ class Parser {
         }
 
         std::optional<ExpressionNode*> parseExpression(int minimumPrecedence = 0) {
+            // Non-Term section
+            bool isNegative = tryPeek(TokenType::subtraction);
+            DataType dataType = DataType::None;
+
+            if(isNegative) consume();
+
+            if(tryPeek(TokenType::intType) && tryPeek(TokenType::openParenthesis, 1)) {
+                consume(); consume();
+                dataType = DataType::Integer;
+            }
+            else if(tryPeek(TokenType::boolType) && tryPeek(TokenType::openParenthesis, 1)) {
+                consume(); consume();
+                dataType = DataType::Boolean;
+            }
+            else if(tryPeek(TokenType::charType) && tryPeek(TokenType::openParenthesis, 1)) {
+                consume(); consume();
+                dataType = DataType::Character;
+            }
+
             std::optional<TermExpressionNode*> term = parseTerm();
 
             if(!term.has_value()) return {};
+            term.value()->isNegative = isNegative;
 
             ExpressionNode* left = m_ArenaAllocator.allocate<ExpressionNode>();
             left->variant = term.value();
@@ -273,6 +295,17 @@ class Parser {
                 || _operator == TokenType::lessThanOrEqual || _operator == TokenType::greaterThan || _operator == TokenType::greaterThanOrEqual
                 || _operator == TokenType::notOperator || _operator == TokenType::andOperator || _operator == TokenType::orOperator) {
                     left->type = DataType::Boolean;
+                }
+            }
+
+            // Check if type-casted
+            if(dataType != DataType::None)  {
+                left->type = dataType;
+
+                if(tryPeek(TokenType::closeParenthesis)) consume();
+                else {
+                    std::cerr << "Expected ')'" << std::endl;
+                    exit(EXIT_FAILURE);
                 }
             }
 

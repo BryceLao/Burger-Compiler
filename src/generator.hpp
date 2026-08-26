@@ -12,10 +12,13 @@ class Generator{
         void generateTerm(const TermExpressionNode* termExpression) {
             struct TermVisitor {
                 Generator* generator;
+                const TermExpressionNode* termExpression;
 
                 void operator()(const LiteralTerm* expressionNodeLiteral) const {
                     generator->m_output << "    mov rax, " << expressionNodeLiteral->literal.value.value() << "\n";
                     generator->push("rax");
+
+                    if(termExpression->isNegative) generator->convertToNegative();
                 }
                 void operator()(const IdentifierTerm* expressionNodeIdentifier) const {
                     if(generator->m_variables.find(expressionNodeIdentifier->identifier.value.value()) == generator->m_variables.end()) {
@@ -25,16 +28,19 @@ class Generator{
 
                     size_t stackLocation = generator->m_variables[expressionNodeIdentifier->identifier.value.value()].stackLocation;
                     generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation - 1) * 8) + "]");
+
+                    if(termExpression->isNegative) generator->convertToNegative();
                 }
                 void operator()(const ParenthesisTerm* parenthesisTerm) const {
                     generator->generateExpression(parenthesisTerm->expression);
+                    if(termExpression->isNegative) generator->convertToNegative();
                 }
                 void operator()(const DummyTerm* dummyTerm) const {
 
                 }
             };
 
-            TermVisitor visitor {.generator = this};
+            TermVisitor visitor {.generator = this, .termExpression = termExpression};
             std::visit(visitor, termExpression->variant);
         }
 
@@ -71,13 +77,16 @@ class Generator{
                                 generator->m_output << "    sub rax,rbx\n";
                                 break;
                             case (TokenType::multiplication):
-                                generator->m_output << "    mul rax,rbx\n";
+                                generator->m_output << "    cqo\n";
+                                generator->m_output << "    imul rax,rbx\n";
                                 break;
                             case (TokenType::division):
-                                generator->m_output << "    div rbx\n";
+                                generator->m_output << "    cqo\n";
+                                generator->m_output << "    idiv rbx\n";
                                 break;
                             case (TokenType::modulo):
-                                generator->m_output << "    div rbx\n";
+                                generator->m_output << "    cqo\n";
+                                generator->m_output << "    idiv rbx\n";
                                 generator->m_output << "    mov rax, rdx\n";
                                 break;
                             case (TokenType::equalTo):
@@ -328,6 +337,11 @@ class Generator{
                         "   push rax\n"
                         "   mov rax, [rsp + 16]\n"
                         "   mov rcx, 10\n"
+                        "   cmp rax, 0\n"
+                        "   jge positiveInt\n"
+                        "   imul rax, -1\n"
+                        "   mov r8, 1\n"
+                        "   positiveInt:\n"
                         "   \n"
                         "   divLoop:\n"
                         "      xor rdx, rdx\n"
@@ -338,6 +352,12 @@ class Generator{
                         "      cmp rax, 0\n"
                         "      jg divLoop\n"
                         "   \n"
+                        "   cmp r8, 1\n"
+                        "   jne printLoop\n"
+                        "   mov rax, 45\n"
+                        "   push rax\n"
+                        "   add rbx, 1\n"
+                        "   xor r8, r8\n"
                         "   printLoop:\n"
                         "      call printASCII\n"
                         "      pop rax\n"
@@ -453,6 +473,12 @@ class Generator{
                 default:
                     break;
             }
+        }
+
+        void convertToNegative() {
+            m_output << "   pop rax\n";
+            m_output << "   imul rax, -1\n";
+            m_output << "   push rax\n";
         }
 
         struct Variable{

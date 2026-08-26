@@ -1,5 +1,12 @@
-set char x = 1;
+set int x = -21;
 
-x = x - 31;
+// This is a comment
 
-print(x);
+print(x/4); // Another comment
+// Skibidi
+print(100); // Test
+
+set bool y = -1;
+print(char(y + 99));
+
+//Wow
