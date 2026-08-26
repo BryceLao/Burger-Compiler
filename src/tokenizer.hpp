@@ -70,6 +70,7 @@ std::optional<int> getPrecedenceLevel(TokenType type) {
 
 struct Token {
     TokenType type;
+    int lineNumber;
     std::optional<std::string> value = {};
 };
 
@@ -81,6 +82,7 @@ class Tokenizer {
         std::vector<Token> tokenize() {
             std::vector<Token> tokens;
             std::string buffer;
+            int curLineNumber = 1;
 
             while(peek().has_value()) {
                 char c = peek().value();
@@ -93,71 +95,71 @@ class Tokenizer {
                     }
 
                     if(buffer == "exit") {
-                        tokens.push_back({.type = TokenType::exit});
+                        tokens.push_back({.type = TokenType::exit, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "print") {
-                        tokens.push_back({.type = TokenType::print});
+                        tokens.push_back({.type = TokenType::print, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "set") {
-                        tokens.push_back({.type = TokenType::set});
+                        tokens.push_back({.type = TokenType::set, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "int") {
-                        tokens.push_back({.type = TokenType::intType});
+                        tokens.push_back({.type = TokenType::intType, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "bool") {
-                        tokens.push_back({.type = TokenType::boolType});
+                        tokens.push_back({.type = TokenType::boolType, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "char") {
-                        tokens.push_back({.type = TokenType::charType});
+                        tokens.push_back({.type = TokenType::charType, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "True") {
-                        tokens.push_back({.type = TokenType::boolLiteral, .value = "1"});
+                        tokens.push_back({.type = TokenType::boolLiteral, .lineNumber = curLineNumber, .value = "1"});
                         buffer.clear();
                     }
                     else if(buffer == "False") {
-                        tokens.push_back({.type = TokenType::boolLiteral, .value = "0"});
+                        tokens.push_back({.type = TokenType::boolLiteral, .lineNumber = curLineNumber, .value = "0"});
                         buffer.clear();
                     }
                     else if(buffer == "if") {
-                        tokens.push_back({.type = TokenType::ifStatement});
+                        tokens.push_back({.type = TokenType::ifStatement, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "else") {
                         if(tryPeek(' ') && tryPeek('i', 1) && tryPeek('f', 2)) {
                             consume(); consume(); consume();
 
-                            tokens.push_back({.type = TokenType::elseIfStatement});
+                            tokens.push_back({.type = TokenType::elseIfStatement, .lineNumber = curLineNumber});
                             buffer.clear();
                         }
                         else {
-                            tokens.push_back({.type = TokenType::elseStatement});
+                            tokens.push_back({.type = TokenType::elseStatement, .lineNumber = curLineNumber});
                             buffer.clear();
                         }
                     }
                     else if(buffer == "while") {
-                        tokens.push_back({.type = TokenType::whileLoop});
+                        tokens.push_back({.type = TokenType::whileLoop, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "and") {
-                        tokens.push_back({.type = TokenType::andOperator});
+                        tokens.push_back({.type = TokenType::andOperator, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "or") {
-                        tokens.push_back({.type = TokenType::orOperator});
+                        tokens.push_back({.type = TokenType::orOperator, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else if(buffer == "not") {
-                        tokens.push_back({.type = TokenType::notOperator});
+                        tokens.push_back({.type = TokenType::notOperator, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else {
-                        tokens.push_back({.type = TokenType::identifier, .value = buffer});
+                        tokens.push_back({.type = TokenType::identifier, .lineNumber = curLineNumber, .value = buffer});
                         buffer.clear();
                     }
                 }
@@ -168,53 +170,55 @@ class Tokenizer {
                         buffer.push_back(consume());
                     }
 
-                    tokens.push_back({.type = TokenType::intLiteral, .value = buffer});
+                    tokens.push_back({.type = TokenType::intLiteral, .lineNumber = curLineNumber, .value = buffer});
                     buffer.clear();
                 }
                 else if(std::isspace(c)) {
+                    if(c == '\n' || c == '\r') ++curLineNumber;
+
                     consume();
                 }
                 else if(c == '=') {
                     consume();
 
                     if(tryPeek('=')) {
-                        tokens.push_back({.type = TokenType::equalTo});
+                        tokens.push_back({.type = TokenType::equalTo, .lineNumber = curLineNumber});
                         consume();
                     }
-                    else tokens.push_back({.type = TokenType::assignment});
+                    else tokens.push_back({.type = TokenType::assignment, .lineNumber = curLineNumber});
                 }
                 else if(c == '<') {
                     consume();
 
                     if(tryPeek('=')) {
-                        tokens.push_back({.type = TokenType::lessThanOrEqual});
+                        tokens.push_back({.type = TokenType::lessThanOrEqual, .lineNumber = curLineNumber});
                         consume();
                     }
-                    else tokens.push_back({.type = TokenType::lessThan});
+                    else tokens.push_back({.type = TokenType::lessThan, .lineNumber = curLineNumber});
                 }
                 else if(c == '>') {
                     consume();
 
                     if(tryPeek('=')) {
-                        tokens.push_back({.type = TokenType::greaterThanOrEqual});
+                        tokens.push_back({.type = TokenType::greaterThanOrEqual, .lineNumber = curLineNumber});
                         consume();
                     }
-                    else tokens.push_back({.type = TokenType::greaterThan});
+                    else tokens.push_back({.type = TokenType::greaterThan, .lineNumber = curLineNumber});
                 }
                 else if(c == '!' && tryPeek('=', 1)) {
                     consume();
                     consume();
 
-                    tokens.push_back({.type = TokenType::notEqualTo});
+                    tokens.push_back({.type = TokenType::notEqualTo, .lineNumber = curLineNumber});
                 }
                 else if(c == '\'') {
                     if(!tryPeek('\'',2)) {
-                        std::cerr << "Expected '" << std::endl;
+                        std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found " << peek(2).value() << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
                     consume();
-                    tokens.push_back({.type = TokenType::charLiteral, .value = std::to_string(static_cast<int>(peek().value()))});
+                    tokens.push_back({.type = TokenType::charLiteral, .lineNumber = curLineNumber, .value = std::to_string(static_cast<int>(peek().value()))});
                     consume(); consume();
                 }
                 else if(c == '/') {
@@ -227,48 +231,48 @@ class Tokenizer {
                             consume();
                         }
                     }
-                    else tokens.push_back({.type = TokenType::division});
+                    else tokens.push_back({.type = TokenType::division, .lineNumber = curLineNumber});
                 }
                 else {
                     switch(c) {
                         case '(':
-                            tokens.push_back({.type = TokenType::openParenthesis});
+                            tokens.push_back({.type = TokenType::openParenthesis, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case ')':
-                            tokens.push_back({.type = TokenType::closeParenthesis});
+                            tokens.push_back({.type = TokenType::closeParenthesis, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case ';':
-                            tokens.push_back({.type = TokenType::semiCol});
+                            tokens.push_back({.type = TokenType::semiCol, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '+':
-                            tokens.push_back({.type = TokenType::addition});
+                            tokens.push_back({.type = TokenType::addition, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '-':
-                            tokens.push_back({.type = TokenType::subtraction});
+                            tokens.push_back({.type = TokenType::subtraction, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '*':
-                            tokens.push_back({.type = TokenType::multiplication});
+                            tokens.push_back({.type = TokenType::multiplication, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '%':
-                            tokens.push_back({.type = TokenType::modulo});
+                            tokens.push_back({.type = TokenType::modulo, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '{':
-                            tokens.push_back({.type = TokenType::openCurlyBrace});
+                            tokens.push_back({.type = TokenType::openCurlyBrace, .lineNumber = curLineNumber});
                             consume();
                             break;
                         case '}':
-                            tokens.push_back({.type = TokenType::closeCurlyBrace});
+                            tokens.push_back({.type = TokenType::closeCurlyBrace, .lineNumber = curLineNumber});
                             consume();
                             break;
                         default:
-                            std::cerr << "Invalid Syntax" << std::endl;
+                            std::cerr << "Line " << curLineNumber << ": Error: Unexpected character '" << c << "'" << std::endl;
                             exit(EXIT_FAILURE);
                     }
                 }

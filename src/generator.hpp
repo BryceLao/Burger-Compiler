@@ -22,7 +22,7 @@ class Generator{
                 }
                 void operator()(const IdentifierTerm* expressionNodeIdentifier) const {
                     if(generator->m_variables.find(expressionNodeIdentifier->identifier.value.value()) == generator->m_variables.end()) {
-                        std::cerr << "Variable Does Not Exist" << std::endl;
+                        std::cerr << "Line " << termExpression->lineNumber << ": Error: Use of undeclared variable '" << expressionNodeIdentifier->identifier.value.value() << "'" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
@@ -47,6 +47,7 @@ class Generator{
         void generateExpression(const ExpressionNode* expression) {
             struct ExpressionVisitor {
                 Generator* generator;
+                const ExpressionNode* expression;
 
                 void operator()(const TermExpressionNode* termExpressionNode) const {
                     generator->generateTerm(termExpressionNode);
@@ -161,7 +162,7 @@ class Generator{
                                 generator->m_output << "    movzx rax, al\n";
                                 break;
                             default:
-                                std::cerr << "Operator Not Supported" << std::endl;
+                                std::cerr << "Line " << expression->lineNumber << ": Internal compiler error: Unknown operator" << std::endl;
                                 exit(EXIT_FAILURE);
                         }
                     }
@@ -178,13 +179,14 @@ class Generator{
         void generateStatement(const StatementNode* statement) {
             struct StatementVisitor {
                 Generator* generator;
+                StatementNode* statementNode;
 
                 void operator()(const ExitNode* exitNode) const {
                     generator->generateExpression(exitNode->expression);
 
-                    // Exit Code can only be a natural number
+                    // Exit Code can only be an integer
                     if(exitNode->expression->type != DataType::Integer) {
-                        std::cerr << "Argument Must Be A Positive Integer" << std::endl;
+                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Exit code must be an integer" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
@@ -206,13 +208,13 @@ class Generator{
                             generator->m_output << "    call printChar\n";
                             break;
                         default:
-                            std::cerr << "Unknown Data Type" << std::endl;
+                            std::cerr << "Line " << statementNode->lineNumber << ": Internal compiler error: Unknown data type"  << std::endl;
                             exit(EXIT_FAILURE);
                     }
                 }
                 void operator()(const DeclarationNode* declarationNode) const {
                     if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
-                        std::cerr << "Redefinition of Identifier" << std::endl;
+                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '" << declarationNode->identifier.value.value() << "'" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
@@ -229,7 +231,7 @@ class Generator{
                 }
                 void operator()(const ReAssignmentNode* reAssignmentNode) const {
                     if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value())) {
-                        std::cerr << "Undeclared Identifier" << std::endl;
+                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Use of undeclared variable '" << reAssignmentNode->identifier.value.value() << "'" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
@@ -340,7 +342,7 @@ class Generator{
                         "   cmp rax, 0\n"
                         "   jge positiveInt\n"
                         "   imul rax, -1\n"
-                        "   mov r8, 1\n"
+                        "   mov r8, 1\n" // Flag for if number is negative
                         "   positiveInt:\n"
                         "   \n"
                         "   divLoop:\n"
@@ -354,7 +356,7 @@ class Generator{
                         "   \n"
                         "   cmp r8, 1\n"
                         "   jne printLoop\n"
-                        "   mov rax, 45\n"
+                        "   mov rax, 45\n" // Add negative character to print queue
                         "   push rax\n"
                         "   add rbx, 1\n"
                         "   xor r8, r8\n"
@@ -415,7 +417,7 @@ class Generator{
             m_output << "boundBool:\n"
                         "   cmp rax, 0\n"
                         "   setne al\n"
-                        "   movzx rax, al\n";
+                        "   movzx rax, al\n\n";
 
             m_output << "boundChar:\n"
                         "   mov rbx, 128\n"

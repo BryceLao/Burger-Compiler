@@ -40,11 +40,13 @@ struct DummyTerm {
 struct TermExpressionNode {
     DataType type;
     bool isNegative;
+    int lineNumber;
     std::variant<LiteralTerm*,IdentifierTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
 struct ExpressionNode {
     DataType type;
+    int lineNumber;
     std::variant<TermExpressionNode*, OperationExpressionNode*> variant;
 };
 
@@ -84,6 +86,7 @@ struct LoopNode {
 };
 
 struct StatementNode{
+    int lineNumber;
     std::variant<ExitNode*, PrintNode*, DeclarationNode*, ReAssignmentNode*, ScopeNode*, ConditionalNode*, LoopNode*> variant;
 };
 
@@ -105,6 +108,7 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = literalExpression;
                 termExpression->type = DataType::Integer;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
@@ -115,6 +119,7 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = literalExpression;
                 termExpression->type = DataType::Boolean;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
@@ -125,6 +130,7 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = literalExpression;
                 termExpression->type = DataType::Character;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
@@ -135,6 +141,7 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = identifierTerm;
                 termExpression->type = m_variables[identifierTerm->identifier.value.value()];
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
@@ -143,16 +150,11 @@ class Parser {
 
                 auto expression = parseExpression();
 
-                if(!expression.has_value()) {
-                    std::cerr << "Invalid Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                if(!expression.has_value()) expectedExpressionError(peek(-1).value().lineNumber);
 
                 if(tryPeek(TokenType::closeParenthesis)) consume();
-                else {
-                    std::cerr << "Expected ')'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ')');
+
 
                 auto parenthesisTerm = m_ArenaAllocator.allocate<ParenthesisTerm>();
                 parenthesisTerm->expression = expression.value();
@@ -160,6 +162,7 @@ class Parser {
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = parenthesisTerm;
                 termExpression->type = expression.value()->type;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
@@ -168,11 +171,12 @@ class Parser {
 
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = dummyTerm;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
 
                 return termExpression;
             }
             else {
-                std::cerr << "Invalid Expression" << std::endl;
+                std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a term after '" << tokenToString(peek(-1).value().type) << "'"  << std::endl;
                 exit(EXIT_FAILURE);
             }
         }
@@ -205,6 +209,7 @@ class Parser {
             ExpressionNode* left = m_ArenaAllocator.allocate<ExpressionNode>();
             left->variant = term.value();
             left->type = term.value()->type;
+            left->lineNumber = peek(-1).value().lineNumber;
 
             while(true) {
                 if(!peek().has_value()) break;
@@ -221,10 +226,7 @@ class Parser {
                 if(operatorToken.type == TokenType::notOperator) right = parseExpression(precedenceLevel.value());
                 else right = parseExpression(precedenceLevel.value() + 1);
 
-                if(!right.has_value()) {
-                    std::cerr << "Invalid Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                if(!right.has_value()) expectedExpressionError(peek(-1).value().lineNumber);
 
                 auto operationExpression = m_ArenaAllocator.allocate<OperationExpressionNode>();
 
@@ -273,7 +275,13 @@ class Parser {
                         operationExpression->_operator = TokenType::orOperator;
                         break;
                     default:
-                        std::cerr << "Invalid Operator" << std::endl;
+                        if(operatorToken.value.has_value())
+                            std::cerr << "Line " << operatorToken.lineNumber << ": Error: Unexpected operator '" << operatorToken.value.value() << "'" << std::endl;
+                        else if(tokenToString(operatorToken.type) != "")
+                            std::cerr << "Line " << operatorToken.lineNumber << ": Error: Unexpected operator '" << tokenToString(operatorToken.type) << "'" << std::endl;
+                        else std::cerr << "Line " << operatorToken.lineNumber << ": Error: Expected an operator" << std::endl;
+
+
                         exit(EXIT_FAILURE);
                 }
 
@@ -303,10 +311,7 @@ class Parser {
                 left->type = dataType;
 
                 if(tryPeek(TokenType::closeParenthesis)) consume();
-                else {
-                    std::cerr << "Expected ')'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ')');
             }
 
             return left;
@@ -319,10 +324,7 @@ class Parser {
                 statements.push_back(parseStatement().value());
             }
 
-            if(!peek().has_value() || peek().value().type != TokenType::closeCurlyBrace) {
-                std::cerr << "Expected '}'" << std::endl;
-                exit(EXIT_FAILURE);
-            }
+            if(!tryPeek(TokenType::closeCurlyBrace)) expectedCharacterError(peek(-1).value().lineNumber, '}');
 
             consume();
 
@@ -338,29 +340,21 @@ class Parser {
                 if(auto expressionNode = parseExpression()) {
                     exitNode->expression = expressionNode.value();
                 }
-                else {
-                    std::cerr << "Expected Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedExpressionError(peek(-1).value().lineNumber);
 
                 if(tryPeek(TokenType::closeParenthesis)) {
                     consume();
                 }
-                else {
-                    std::cerr << "Expected ')'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ')');
 
                 if(tryPeek(TokenType::semiCol)) {
                     consume();
                 }
-                else {
-                    std::cerr << "Expected ';'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ';');
 
                 auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                 statementNode->variant = exitNode;
+                statementNode->lineNumber = peek(-1).value().lineNumber;
 
                 return statementNode;
             }
@@ -372,29 +366,21 @@ class Parser {
                 if(auto expressionNode = parseExpression()) {
                     printNode->expression = expressionNode.value();
                 }
-                else {
-                    std::cerr << "Expected Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedExpressionError(peek(-1).value().lineNumber);
 
                 if(tryPeek(TokenType::closeParenthesis)) {
                     consume();
                 }
-                else {
-                    std::cerr << "Expected ')'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ')');
 
                 if(tryPeek(TokenType::semiCol)) {
                     consume();
                 }
-                else {
-                    std::cerr << "Expected ';'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ';');
 
                 auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                 statementNode->variant = printNode;
+                statementNode->lineNumber = peek(-1).value().lineNumber;
 
                 return statementNode;
             }
@@ -414,7 +400,7 @@ class Parser {
                         declarationNode->type = DataType::Character;
                         break;
                     default:
-                        std::cerr << "Expected DataType Identifier" << std::endl;
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a data type after 'set'" << std::endl;
                         exit(EXIT_FAILURE);
                 }
 
@@ -427,25 +413,20 @@ class Parser {
                 if(auto expressionNode = parseExpression()) {
                     declarationNode->expression = expressionNode.value();
                 }
-                else {
-                    std::cerr << "Variable Not Set To A Value" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedExpressionError(peek(-1).value().lineNumber);
 
                 if(tryPeek(TokenType::semiCol)) {
                     consume();
 
                     auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                     statementNode->variant = declarationNode;
+                    statementNode->lineNumber = peek(-1).value().lineNumber;
 
                     m_variables[declarationNode->identifier.value.value()] = declarationNode->type;
 
                     return statementNode;
                 }
-                else {
-                    std::cerr << "Expected ';'" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, ';');
             }
             else if(tryPeek(TokenType::identifier)) {
                 auto reAssignmentNode = m_ArenaAllocator.allocate<ReAssignmentNode>();
@@ -462,23 +443,15 @@ class Parser {
 
                             auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                             statementNode->variant = reAssignmentNode;
+                            statementNode->lineNumber = peek(-1).value().lineNumber;
 
                             return statementNode;
                         }
-                        else {
-                            std::cerr << "Expected ';'" << std::endl;
-                            exit(EXIT_FAILURE);
-                        }
+                        else expectedCharacterError(peek(-1).value().lineNumber, ';');
                     }
-                    else {
-                        std::cerr << "Expected Expression" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else expectedExpressionError(peek(-1).value().lineNumber);
                 }
-                else {
-                    std::cerr << "Expected Assignment Operator" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedCharacterError(peek(-1).value().lineNumber, '=');
             }
             else if(tryPeek(TokenType::openCurlyBrace)) {
                 consume();
@@ -488,6 +461,7 @@ class Parser {
 
                 auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                 statementNode->variant = scopeNode;
+                statementNode->lineNumber = peek(-1).value().lineNumber;
 
                 return statementNode;
             }
@@ -515,15 +489,9 @@ class Parser {
 
                                     conditionalNode->statements.push_back(parseScope().value());
                                 }
-                                else {
-                                    std::cerr << "Expected '{'" << std::endl;
-                                    exit(EXIT_FAILURE);
-                                }
+                                else expectedCharacterError(peek(-1).value().lineNumber, '{');
                             }
-                            else {
-                                std::cerr << "Expected Expression" << std::endl;
-                                exit(EXIT_FAILURE);
-                            }
+                            else expectedExpressionError(peek(-1).value().lineNumber);
                         }
 
                         if(tryPeek(TokenType::elseStatement)) {
@@ -534,26 +502,18 @@ class Parser {
 
                                 conditionalNode->statements.push_back(parseScope().value());
                             }
-                            else {
-                                std::cerr << "Expected '{'" << std::endl;
-                                exit(EXIT_FAILURE);
-                            }
+                            else expectedCharacterError(peek(-1).value().lineNumber, '{');
                         }
 
                         auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                         statementNode->variant = conditionalNode;
+                        statementNode->lineNumber = peek(-1).value().lineNumber;
 
                         return statementNode;
                     }
-                    else {
-                        std::cerr << "Expected '{'" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else expectedCharacterError(peek(-1).value().lineNumber, '{');
                 }
-                else {
-                    std::cerr << "Expected Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-                }
+                else expectedExpressionError(peek(-1).value().lineNumber);
             }
             else if(tryPeek(TokenType::whileLoop)) {
                 consume();
@@ -570,19 +530,13 @@ class Parser {
 
                         auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                         statementNode->variant = loopNode;
+                        statementNode->lineNumber = peek(-1).value().lineNumber;
 
                         return statementNode;
                     }
-                    else {
-                        std::cerr << "Expected '{'" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else expectedCharacterError(peek(-1).value().lineNumber, '{');
                 }
-                else {
-                    std::cerr << "Expected Expression" << std::endl;
-                    exit(EXIT_FAILURE);
-
-                }
+                else expectedExpressionError(peek(-1).value().lineNumber);
             }
             else return {};
         }
@@ -595,7 +549,7 @@ class Parser {
                    program.statements.push_back(statement.value());
                 }
                 else {
-                    std::cerr << "Couldn't Parse Statement" << std::endl;
+                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Couldn't parse statement" << std::endl;
                     exit(EXIT_FAILURE);
                 }
             }
@@ -622,5 +576,89 @@ class Parser {
 
         inline Token consume() {
             return m_Tokens.at(m_Index++);
+        }
+
+        void expectedCharacterError(int lineNumber, char expectedCharacter) {
+            if(peek().has_value()) {
+                std::cerr << "Line " << lineNumber << ": Error: Expected '" << expectedCharacter << "' but found " << tokenToString(
+                        peek().value().type) << std::endl;
+            }
+            else {
+                std::cerr << "Line " << lineNumber << ": Error: Expected '" << expectedCharacter << "' but found none"<< std::endl;
+            }
+
+            exit(EXIT_FAILURE);
+        }
+
+        void expectedExpressionError(int lineNumber) {
+            std::cerr << "Line " << lineNumber << ": Error: Expected expression after '" << tokenToString(peek(-1).value().type) << "'" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        std::string tokenToString(TokenType type) {
+            switch(type) {
+                case TokenType::exit:
+                    return "exit";
+                case TokenType::print:
+                    return "print";
+                case TokenType::intType:
+                    return "int";
+                case TokenType::boolType:
+                    return "bool";
+                case TokenType::charType:
+                    return "char";
+                case TokenType::set:
+                    return "set";
+                case TokenType::assignment:
+                    return "=";
+                case TokenType::semiCol:
+                    return ";";
+                case TokenType::openParenthesis:
+                    return "(";
+                case TokenType::closeParenthesis:
+                    return ")";
+                case TokenType::openCurlyBrace:
+                    return "{";
+                case TokenType::closeCurlyBrace:
+                    return "}";
+                case TokenType::addition:
+                    return "+";
+                case TokenType::subtraction:
+                    return "-";
+                case TokenType::multiplication:
+                    return "*";
+                case TokenType::division:
+                    return "/";
+                case TokenType::modulo:
+                    return "%";
+                case TokenType::lessThan:
+                    return "<";
+                case TokenType::greaterThan:
+                    return ">";
+                case TokenType::lessThanOrEqual:
+                    return "<=";
+                case TokenType::greaterThanOrEqual:
+                    return "=>";
+                case TokenType::equalTo:
+                    return "==";
+                case TokenType::notEqualTo:
+                    return "!=";
+                case TokenType::andOperator:
+                    return "and";
+                case TokenType::orOperator:
+                    return "or";
+                case TokenType::notOperator:
+                    return "not";
+                case TokenType::ifStatement:
+                    return "if";
+                case TokenType::elseIfStatement:
+                    return "else if";
+                case TokenType::elseStatement:
+                    return "else";
+                case TokenType::whileLoop:
+                    return "while";
+                default:
+                    return "";
+            }
         }
 };

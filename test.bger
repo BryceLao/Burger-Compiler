@@ -1,12 +1,1 @@
-set int x = -21;
-
-// This is a comment
-
-print(x/4); // Another comment
-// Skibidi
-print(100); // Test
-
-set bool y = -1;
-print(char(y + 99));
-
-//Wow
+set int x = (5 set 2);

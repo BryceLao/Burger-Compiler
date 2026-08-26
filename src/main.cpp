@@ -31,11 +31,6 @@ int main(int argc, char* argv[]) {
 
     std::optional<ProgramNode> program = parser.parseProgram();
 
-    if(!program.has_value()) {
-        std::cerr << "No Exit Statement Found" << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
     Generator generator(program.value());
     {
         std::fstream file("out.asm", std::ios::out);
