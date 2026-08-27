@@ -1,11 +1,19 @@
-set int[] x = new Array[2];
-set int[] y = new Array[10];
+set char[] a = new Array[26];
 
-x[1] = 100;
-y[(5 -3) * 1] = x[1];
+set char curChar = 'a';
+set int counter = 0;
 
-print(y[2]);
+while counter < 26 {
+    a[counter] = curChar;
+    counter = counter + 1;
+    curChar = curChar + 1;
+}
 
-.
+counter = 0;
 
-print(y.size();
+while counter < 26 {
+    print(a[counter]);
+    counter = counter + 1;
+}
+
+print(counter);

@@ -27,7 +27,7 @@ class Generator{
                     }
 
                     int stackLocation = generator->m_variables[expressionNodeIdentifier->identifier.value.value()].stackLocation;
-                    generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation - 1) * 8) + "]");
+                    generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation) * 8) + "]");
 
                     if(termExpression->isNegative) generator->convertToNegative();
                 }
@@ -47,7 +47,7 @@ class Generator{
 
                     int stackLocation = generator->m_variables[indexedTerm->identifier.value.value()].stackLocation;
 
-                    generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "\n";
+                    generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "\n";
 
                     generator->push("[rsp + rax]");
 
@@ -240,16 +240,16 @@ class Generator{
                         exit(EXIT_FAILURE);
                     }
 
-                    generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
-                                                                                                        .stackLocation = generator->m_stackSize,
-                                                                                                        .type = declarationNode->type}});
-
                     generator->generateExpression(declarationNode->expression);
                     generator->pop("rax");
 
                     generator->boundVariable(declarationNode->type);
 
                     generator->push("rax");
+
+                    generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
+                            .stackLocation = generator->m_stackSize,
+                            .type = declarationNode->type}});
                 }
                 void operator()(const ArrayDeclarationNode* declarationNode) const {
                     if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
@@ -292,7 +292,7 @@ class Generator{
 
                         int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
 
-                        generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "\n";
+                        generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "\n";
                         generator->m_output << "    mov [rsp + rax], rbx\n";
                     }
                     else {
@@ -302,7 +302,7 @@ class Generator{
 
                         int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
                         generator->m_output << "    mov [rsp + "
-                                            << std::to_string((generator->m_stackSize - stackLocation - 1) * 8)
+                                            << std::to_string((generator->m_stackSize - stackLocation) * 8)
                                             << "], rax\n";
                     }
                 }
