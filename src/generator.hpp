@@ -26,8 +26,30 @@ class Generator{
                         exit(EXIT_FAILURE);
                     }
 
-                    size_t stackLocation = generator->m_variables[expressionNodeIdentifier->identifier.value.value()].stackLocation;
+                    int stackLocation = generator->m_variables[expressionNodeIdentifier->identifier.value.value()].stackLocation;
                     generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation - 1) * 8) + "]");
+
+                    if(termExpression->isNegative) generator->convertToNegative();
+                }
+                void operator()(const IndexedTerm* indexedTerm) const {
+                    generator->generateExpression(indexedTerm->index);
+                    generator->pop("rax");
+
+                    generator->m_output << "    cmp rax, " << generator->m_variables[indexedTerm->identifier.value.value()].size.value() << "\n";
+                    generator->m_output << "    jge outOfBounds\n";
+                    generator->m_output << "    cmp rax, 0\n";
+                    generator->m_output << "    jl outOfBounds\n";
+
+                    generator->m_output << "    mov rbx, 8\n";
+
+                    generator->m_output << "    cqo\n";
+                    generator->m_output << "    imul rax,rbx\n";
+
+                    int stackLocation = generator->m_variables[indexedTerm->identifier.value.value()].stackLocation;
+
+                    generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "\n";
+
+                    generator->push("[rsp + rax]");
 
                     if(termExpression->isNegative) generator->convertToNegative();
                 }
@@ -172,14 +194,14 @@ class Generator{
                 }
             };
 
-            ExpressionVisitor visitor {.generator = this};
+            ExpressionVisitor visitor {.generator = this, .expression = expression};
             std::visit(visitor, expression->variant);
         }
 
         void generateStatement(const StatementNode* statement) {
             struct StatementVisitor {
                 Generator* generator;
-                StatementNode* statementNode;
+                const StatementNode* statementNode;
 
                 void operator()(const ExitNode* exitNode) const {
                     generator->generateExpression(exitNode->expression);
@@ -212,7 +234,7 @@ class Generator{
                             exit(EXIT_FAILURE);
                     }
                 }
-                void operator()(const DeclarationNode* declarationNode) const {
+                void operator()(const PrimitiveDeclarationNode* declarationNode) const {
                     if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
                         std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '" << declarationNode->identifier.value.value() << "'" << std::endl;
                         exit(EXIT_FAILURE);
@@ -229,6 +251,21 @@ class Generator{
 
                     generator->push("rax");
                 }
+                void operator()(const ArrayDeclarationNode* declarationNode) const {
+                    if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
+                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '" << declarationNode->identifier.value.value() << "'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                    int size = declarationNode->size;
+                    generator->m_output << "    sub rsp, " << size * 8 << "\n";
+                    generator->m_stackSize += size;
+
+                    generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
+                            .stackLocation = generator->m_stackSize,
+                            .type = getPrimitiveVariant(declarationNode->type),
+                            .size = size}});
+                }
                 void operator()(const ReAssignmentNode* reAssignmentNode) const {
                     if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value())) {
                         std::cerr << "Line " << statementNode->lineNumber << ": Error: Use of undeclared variable '" << reAssignmentNode->identifier.value.value() << "'" << std::endl;
@@ -236,12 +273,38 @@ class Generator{
                     }
 
                     generator->generateExpression(reAssignmentNode->expression);
-                    generator->pop("rax");
 
-                    generator->boundVariable(generator->m_variables[reAssignmentNode->identifier.value.value()].type);
+                    if(reAssignmentNode->index.has_value()) {
+                        generator->generateExpression(reAssignmentNode->index.value());
+                        generator->pop("rax");
 
-                    size_t stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
-                    generator->m_output << "    mov [rsp + " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "], rax\n";
+                        generator->m_output << "    cmp rax, " << generator->m_variables[reAssignmentNode->identifier.value.value()].size.value() << "\n";
+                        generator->m_output << "    jge outOfBounds\n";
+                        generator->m_output << "    cmp rax, 0\n";
+                        generator->m_output << "    jl outOfBounds\n";
+
+                        generator->m_output << "    mov rbx, 8\n";
+
+                        generator->m_output << "    cqo\n";
+                        generator->m_output << "    imul rax,rbx\n";
+
+                        generator->pop("rbx");
+
+                        int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
+
+                        generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation - 1) * 8) << "\n";
+                        generator->m_output << "    mov [rsp + rax], rbx\n";
+                    }
+                    else {
+                        generator->pop("rax");
+                        generator->boundVariable(
+                                generator->m_variables[reAssignmentNode->identifier.value.value()].type);
+
+                        int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
+                        generator->m_output << "    mov [rsp + "
+                                            << std::to_string((generator->m_stackSize - stackLocation - 1) * 8)
+                                            << "], rax\n";
+                    }
                 }
                 void operator()(const ScopeNode* scopeNode) const {
                     generator->generateScope(scopeNode->statements);
@@ -293,7 +356,7 @@ class Generator{
                 }
             };
 
-            StatementVisitor visitor {.generator = this};
+            StatementVisitor visitor {.generator = this, .statementNode = statement};
             std::visit(visitor, statement->variant);
         }
 
@@ -306,15 +369,33 @@ class Generator{
                 generateStatement(statement);
             }
 
-            m_output << "      mov rax, 1\n"
-                        "      mov rdi, 1\n"
-                        "      mov rsi, exitMsg\n"
-                        "      mov rdx, 32\n"
-                        "      syscall\n";
+            m_output << "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, exitMsg\n"
+                        "    mov rdx, 32\n"
+                        "    syscall\n";
 
             m_output << "    mov rax, 60\n";
             m_output << "    mov rdi, 0\n";
             m_output << "    syscall\n";
+
+            m_output << "outOfBounds:\n";
+            m_output << "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, oobMsg\n"
+                        "    mov rdx, 33\n"
+                        "    syscall\n";
+
+            m_output << "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, exitMsg\n"
+                        "    mov rdx, 32\n"
+                        "    syscall\n";
+
+            m_output << "    mov rax, 60\n";
+            m_output << "    mov rdi, 1\n";
+            m_output << "    syscall\n";
+
 
             generateUtil();
 
@@ -323,10 +404,11 @@ class Generator{
 
         void generateData() {
             m_output << "section .data\n"
-                        "   exitMsg db \"Process finished with exit code \"\n"
-                        "   trueString db \"True\"\n"
-                        "   falseString db \"False\"\n"
-                        "   newLine db 10\n"
+                        "    exitMsg db \"Process finished with exit code \"\n"
+                        "    oobMsg db \"Error: Array index out of bounds\", 10\n"
+                        "    trueString db \"True\"\n"
+                        "    falseString db \"False\"\n"
+                        "    newLine db 10\n"
                         "\n";
         }
 
@@ -334,101 +416,101 @@ class Generator{
             m_output << "\n\n\n ; Util Functions \n\n\n";
 
             m_output << "printInt:\n"
-                        "   mov rbx, 1\n"
-                        "   mov rax, 10\n"   // New Line Character
-                        "   push rax\n"
-                        "   mov rax, [rsp + 16]\n"
-                        "   mov rcx, 10\n"
-                        "   cmp rax, 0\n"
-                        "   jge positiveInt\n"
-                        "   imul rax, -1\n"
-                        "   mov r8, 1\n" // Flag for if number is negative
-                        "   positiveInt:\n"
+                        "    mov rbx, 1\n"
+                        "    mov rax, 10\n"   // New Line Character
+                        "    push rax\n"
+                        "    mov rax, [rsp + 16]\n"
+                        "    mov rcx, 10\n"
+                        "    cmp rax, 0\n"
+                        "    jge positiveInt\n"
+                        "    imul rax, -1\n"
+                        "    mov r8, 1\n" // Flag for if number is negative
+                        "    positiveInt:\n"
                         "   \n"
-                        "   divLoop:\n"
-                        "      xor rdx, rdx\n"
-                        "      div rcx\n"
-                        "      add rbx, 1\n"
-                        "      add rdx, '0'\n"
-                        "      push rdx\n"
-                        "      cmp rax, 0\n"
-                        "      jg divLoop\n"
+                        "    divLoop:\n"
+                        "        xor rdx, rdx\n"
+                        "        div rcx\n"
+                        "        add rbx, 1\n"
+                        "        add rdx, '0'\n"
+                        "        push rdx\n"
+                        "        cmp rax, 0\n"
+                        "        jg divLoop\n"
                         "   \n"
-                        "   cmp r8, 1\n"
-                        "   jne printLoop\n"
-                        "   mov rax, 45\n" // Add negative character to print queue
-                        "   push rax\n"
-                        "   add rbx, 1\n"
-                        "   xor r8, r8\n"
-                        "   printLoop:\n"
-                        "      call printASCII\n"
-                        "      pop rax\n"
-                        "      sub rbx, 1\n"
-                        "      cmp rbx, 0\n"
-                        "      jg printLoop\n"
+                        "    cmp r8, 1\n"
+                        "    jne printLoop\n"
+                        "    mov rax, 45\n" // Add negative character to print queue
+                        "    push rax\n"
+                        "    add rbx, 1\n"
+                        "    xor r8, r8\n"
+                        "    printLoop:\n"
+                        "        call printASCII\n"
+                        "        pop rax\n"
+                        "        sub rbx, 1\n"
+                        "        cmp rbx, 0\n"
+                        "        jg printLoop\n"
                         "   \n"
-                        "   ret\n"
+                        "    ret\n"
                         "\n"
                         "printASCII:\n"
-                        "   mov rax, 1\n"
-                        "   mov rdi, 1\n"
-                        "   lea rsi, [rsp + 8]\n"
-                        "   mov rdx, 1\n"
-                        "   syscall\n"
-                        "   ret\n\n";
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    lea rsi, [rsp + 8]\n"
+                        "    mov rdx, 1\n"
+                        "    syscall\n"
+                        "    ret\n\n";
 
             m_output << "printBool:\n"
-                        "   mov rax, 1\n"
-                        "   mov rdi, 1\n"
-                        "   mov rsi, [rsp + 8]\n"
-                        "   cmp rsi, 0\n"
-                        "   je falseStatement\n"
-                        "   trueStatement:\n"
-                        "      mov rsi, trueString\n"
-                        "      mov rdx, 4\n"
-                        "      jmp endFunction\n"
-                        "   falseStatement:\n"
-                        "      mov rsi, falseString\n"
-                        "      mov rdx, 5\n"
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, [rsp + 8]\n"
+                        "    cmp rsi, 0\n"
+                        "    je falseStatement\n"
+                        "    trueStatement:\n"
+                        "        mov rsi, trueString\n"
+                        "        mov rdx, 4\n"
+                        "        jmp endFunction\n"
+                        "    falseStatement:\n"
+                        "        mov rsi, falseString\n"
+                        "        mov rdx, 5\n"
                         "   endFunction:\n"
-                        "      syscall\n"
-                        "      mov rax, 1\n"
-                        "      mov rdi, 1\n"
-                        "      mov rsi, newLine\n"
-                        "      mov rdx, 1\n"
-                        "      syscall\n"
+                        "        syscall\n"
+                        "        mov rax, 1\n"
+                        "        mov rdi, 1\n"
+                        "        mov rsi, newLine\n"
+                        "        mov rdx, 1\n"
+                        "        syscall\n"
                         "   \n"
-                        "   ret\n"
+                        "    ret\n"
                         "   \n";
 
             m_output << "printChar:\n"
-                        "   mov rax, 1\n"
-                        "   mov rdi, 1\n"
-                        "   lea rsi, [rsp + 8]\n"
-                        "   mov rdx, 1\n"
-                        "   syscall\n"
-                        "   mov rax, 1\n"
-                        "   mov rdi, 1\n"
-                        "   mov rsi, newLine\n"
-                        "   mov rdx, 1\n"
-                        "   syscall\n"
-                        "   ret\n\n";
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    lea rsi, [rsp + 8]\n"
+                        "    mov rdx, 1\n"
+                        "    syscall\n"
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, newLine\n"
+                        "    mov rdx, 1\n"
+                        "    syscall\n"
+                        "    ret\n\n";
 
             m_output << "boundBool:\n"
-                        "   cmp rax, 0\n"
-                        "   setne al\n"
-                        "   movzx rax, al\n\n";
+                        "    cmp rax, 0\n"
+                        "    setne al\n"
+                        "    movzx rax, al\n\n";
 
             m_output << "boundChar:\n"
-                        "   mov rbx, 128\n"
-                        "   cqo\n"
-                        "   idiv rbx\n"
-                        "   test rdx, rdx\n"
-                        "   jns doneDividing\n"
-                        "   add rdx, 128\n"
-                        "   doneDividing:\n"
-                        "      mov rax, rdx\n"
-                        "   ret\n";
+                        "    mov rbx, 128\n"
+                        "    cqo\n"
+                        "    idiv rbx\n"
+                        "    test rdx, rdx\n"
+                        "    jns doneDividing\n"
+                        "    add rdx, 128\n"
+                        "    doneDividing:\n"
+                        "        mov rax, rdx\n"
+                        "    ret\n";
         }
 
     private:
@@ -487,6 +569,7 @@ class Generator{
             int scopeDepth;
             size_t stackLocation;
             DataType type;
+            std::optional<int> size;
         };
 
         const ProgramNode m_program;

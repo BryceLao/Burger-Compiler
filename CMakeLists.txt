@@ -8,4 +8,5 @@ add_executable(burger src/main.cpp
         src/tokenizer.hpp
         src/parser.hpp
         src/generator.hpp
-        src/arenaAllocator.hpp)
+        src/arenaAllocator.hpp
+        src/util.hpp)

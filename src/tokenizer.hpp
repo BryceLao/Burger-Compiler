@@ -2,43 +2,7 @@
 
 #include <string>
 #include <vector>
-
-enum class TokenType {
-    exit,
-    print,
-    intLiteral,
-    intType,
-    boolLiteral,
-    boolType,
-    charLiteral,
-    charType,
-    identifier,
-    set,
-    assignment,
-    semiCol,
-    openParenthesis,
-    closeParenthesis,
-    openCurlyBrace,
-    closeCurlyBrace,
-    addition,
-    subtraction,
-    multiplication,
-    division,
-    modulo,
-    lessThan,
-    greaterThan,
-    lessThanOrEqual,
-    greaterThanOrEqual,
-    equalTo,
-    notEqualTo,
-    andOperator,
-    orOperator,
-    notOperator,
-    ifStatement,
-    elseIfStatement,
-    elseStatement,
-    whileLoop
-};
+#include "util.hpp"
 
 std::optional<int> getPrecedenceLevel(TokenType type) {
     switch (type) {
@@ -158,6 +122,18 @@ class Tokenizer {
                         tokens.push_back({.type = TokenType::notOperator, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
+                    else if(buffer == "new") {
+                        tokens.push_back({.type = TokenType::newKeyWord, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "Array") {
+                        tokens.push_back({.type = TokenType::arrayType, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "size") {
+                        tokens.push_back({.type = TokenType::size, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
                     else {
                         tokens.push_back({.type = TokenType::identifier, .lineNumber = curLineNumber, .value = buffer});
                         buffer.clear();
@@ -174,7 +150,7 @@ class Tokenizer {
                     buffer.clear();
                 }
                 else if(std::isspace(c)) {
-                    if(c == '\n' || c == '\r') ++curLineNumber;
+                    if(c == '\n') ++curLineNumber;
 
                     consume();
                 }
@@ -269,6 +245,18 @@ class Tokenizer {
                             break;
                         case '}':
                             tokens.push_back({.type = TokenType::closeCurlyBrace, .lineNumber = curLineNumber});
+                            consume();
+                            break;
+                        case '[':
+                            tokens.push_back({.type = TokenType::openBracket, .lineNumber = curLineNumber});
+                            consume();
+                            break;
+                        case ']':
+                            tokens.push_back({.type = TokenType::closeBracket, .lineNumber = curLineNumber});
+                            consume();
+                            break;
+                        case '.':
+                            tokens.push_back({.type = TokenType::dot, .lineNumber = curLineNumber});
                             consume();
                             break;
                         default:

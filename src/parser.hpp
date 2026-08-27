@@ -5,13 +5,16 @@
 
 #include "tokenizer.hpp"
 #include "arenaAllocator.hpp"
+#include "util.hpp"
 
-enum class DataType {
-    Integer,
-    Boolean,
-    Character,
+enum class GroupType {
+    Primitive,
+    Arrays,
+    Strings,
     None
 };
+
+struct ExpressionNode;
 
 struct LiteralTerm {
     Token literal;
@@ -21,7 +24,10 @@ struct IdentifierTerm {
     Token identifier;
 };
 
-struct ExpressionNode;
+struct IndexedTerm {
+    Token identifier;
+    ExpressionNode* index;
+};
 
 struct OperationExpressionNode {
     ExpressionNode* left;
@@ -41,7 +47,7 @@ struct TermExpressionNode {
     DataType type;
     bool isNegative;
     int lineNumber;
-    std::variant<LiteralTerm*,IdentifierTerm*, ParenthesisTerm*, DummyTerm*> variant;
+    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
 struct ExpressionNode {
@@ -60,15 +66,22 @@ struct PrintNode {
     ExpressionNode* expression;
 };
 
-struct DeclarationNode {
+struct PrimitiveDeclarationNode {
     Token identifier;
     DataType type;
     ExpressionNode* expression;
 };
 
+struct ArrayDeclarationNode {
+    Token identifier;
+    DataType type;
+    int size;
+};
+
 struct ReAssignmentNode {
     Token identifier;
     ExpressionNode* expression;
+    std::optional<ExpressionNode*> index;
 };
 
 struct ScopeNode {
@@ -87,7 +100,7 @@ struct LoopNode {
 
 struct StatementNode{
     int lineNumber;
-    std::variant<ExitNode*, PrintNode*, DeclarationNode*, ReAssignmentNode*, ScopeNode*, ConditionalNode*, LoopNode*> variant;
+    std::variant<ExitNode*, PrintNode*, PrimitiveDeclarationNode*, ArrayDeclarationNode*, ReAssignmentNode*, ScopeNode*, ConditionalNode*, LoopNode*> variant;
 };
 
 struct ProgramNode {
@@ -135,15 +148,80 @@ class Parser {
                 return termExpression;
             }
             else if(tryPeek(TokenType::identifier)) {
-                auto identifierTerm = m_ArenaAllocator.allocate<IdentifierTerm>();
-                identifierTerm->identifier = consume();
+                Token term = consume();
 
-                auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
-                termExpression->variant = identifierTerm;
-                termExpression->type = m_variables[identifierTerm->identifier.value.value()];
-                termExpression->lineNumber = peek(-1).value().lineNumber;
+                if(m_variables.find(term.value.value()) != m_variables.end()) {
+                    if(tryPeek(TokenType::openBracket))  {
+                        if(getGroupType(m_variables[term.value.value()].dataType) == GroupType::Primitive) {
+                            std::cerr << "Line " << peek().value().lineNumber << ": Error: Cannot index non-array variable '" << term.value.value() << "'"  << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
 
-                return termExpression;
+                        auto indexedTerm = m_ArenaAllocator.allocate<IndexedTerm>();
+                        consume();
+
+                        auto expression = parseExpression();
+                        if(!expression.has_value()) expectedExpressionError(peek(-1).value().lineNumber);
+
+                        if(!tryPeek(TokenType::closeBracket)) expectedCharacterError(peek(-1).value().lineNumber, ']');
+                        consume();
+
+                        indexedTerm->identifier = term;
+                        indexedTerm->index = expression.value();
+
+                        auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                        termExpression->variant = indexedTerm;
+                        termExpression->type = getPrimitiveVariant(m_variables[term.value.value()].dataType);
+                        termExpression->lineNumber = peek(-1).value().lineNumber;
+
+                        return termExpression;
+                    }
+                    else if(tryPeek(TokenType::dot)) {
+                        consume();
+
+                        if(tryPeek(TokenType::size)) {
+                            consume();
+
+                            if(!tryPeek(TokenType::openParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, '(');
+                            consume();
+
+                            if(!tryPeek(TokenType::closeParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, ')');
+                            consume();
+
+                            auto literalExpression = m_ArenaAllocator.allocate<LiteralTerm>();
+                            Token token = {.type = TokenType::intLiteral, .lineNumber = term.lineNumber,
+                                           .value = m_variables[term.value.value()].size.value()};
+
+                            literalExpression->literal = token;
+
+                            auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                            termExpression->variant = literalExpression;
+                            termExpression->type = DataType::Integer;
+                            termExpression->lineNumber = token.lineNumber;
+
+                            return termExpression;
+                        }
+                        else {
+                            std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a property after '.'"  << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    else {
+                        auto identifierTerm = m_ArenaAllocator.allocate<IdentifierTerm>();
+                        identifierTerm->identifier = term;
+
+                        auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                        termExpression->variant = identifierTerm;
+                        termExpression->type = m_variables[term.value.value()].dataType;
+                        termExpression->lineNumber = peek(-1).value().lineNumber;
+
+                        return termExpression;
+                    }
+                }
+                else {
+                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Use of undeclared variable '" << term.value.value() << "'"  << std::endl;
+                    exit(EXIT_FAILURE);
+                }
             }
             else if(tryPeek(TokenType::openParenthesis)) {
                 consume();
@@ -154,7 +232,6 @@ class Parser {
 
                 if(tryPeek(TokenType::closeParenthesis)) consume();
                 else expectedCharacterError(peek(-1).value().lineNumber, ')');
-
 
                 auto parenthesisTerm = m_ArenaAllocator.allocate<ParenthesisTerm>();
                 parenthesisTerm->expression = expression.value();
@@ -171,7 +248,7 @@ class Parser {
 
                 auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                 termExpression->variant = dummyTerm;
-                termExpression->lineNumber = peek(-1).value().lineNumber;
+                termExpression->lineNumber = peek().value().lineNumber;
 
                 return termExpression;
             }
@@ -184,10 +261,11 @@ class Parser {
         std::optional<ExpressionNode*> parseExpression(int minimumPrecedence = 0) {
             // Non-Term section
             bool isNegative = tryPeek(TokenType::subtraction);
-            DataType dataType = DataType::None;
+            DataType dataType = DataType::Empty;
 
             if(isNegative) consume();
 
+            // Type casting
             if(tryPeek(TokenType::intType) && tryPeek(TokenType::openParenthesis, 1)) {
                 consume(); consume();
                 dataType = DataType::Integer;
@@ -285,29 +363,41 @@ class Parser {
                         exit(EXIT_FAILURE);
                 }
 
-                auto temp = m_ArenaAllocator.allocate<ExpressionNode>(); //Prevents pointer loop
+                if(getGroupType(left->type) == GroupType::Primitive &&
+                        getGroupType(right.value()->type) == GroupType::Primitive) {
+                    auto temp = m_ArenaAllocator.allocate<ExpressionNode>(); //Prevents pointer loop
 
-                temp->variant = left->variant;
+                    temp->variant = left->variant;
 
-                operationExpression->left = temp;
-                operationExpression->right = right.value();
+                    operationExpression->left = temp;
+                    operationExpression->right = right.value();
 
-                left->variant = operationExpression;
+                    left->variant = operationExpression;
 
-                auto _operator = operationExpression->_operator;
-                if(_operator == TokenType::addition || _operator == TokenType::subtraction || _operator == TokenType::multiplication
-                || _operator == TokenType::division || _operator == TokenType::modulo) {
-                    left->type = DataType::Integer;
+                    auto _operator = operationExpression->_operator;
+                    if (_operator == TokenType::addition || _operator == TokenType::subtraction ||
+                        _operator == TokenType::multiplication
+                        || _operator == TokenType::division || _operator == TokenType::modulo) {
+                        left->type = DataType::Integer;
+                    } else if (_operator == TokenType::equalTo || _operator == TokenType::notEqualTo ||
+                               _operator == TokenType::lessThan
+                               || _operator == TokenType::lessThanOrEqual || _operator == TokenType::greaterThan ||
+                               _operator == TokenType::greaterThanOrEqual
+                               || _operator == TokenType::notOperator || _operator == TokenType::andOperator ||
+                               _operator == TokenType::orOperator) {
+                        left->type = DataType::Boolean;
+                    }
                 }
-                else if(_operator == TokenType::equalTo || _operator == TokenType::notEqualTo || _operator == TokenType::lessThan
-                || _operator == TokenType::lessThanOrEqual || _operator == TokenType::greaterThan || _operator == TokenType::greaterThanOrEqual
-                || _operator == TokenType::notOperator || _operator == TokenType::andOperator || _operator == TokenType::orOperator) {
-                    left->type = DataType::Boolean;
+                else {
+                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '" << tokenToString(operationExpression->_operator) <<
+                                "' cannot be applied to types '" << dataTypeToString(left->type) << "' and '"
+                                << dataTypeToString(right.value()->type) << "'" << std::endl;
+                    exit(EXIT_FAILURE);
                 }
             }
 
             // Check if type-casted
-            if(dataType != DataType::None)  {
+            if(dataType != DataType::Empty)  {
                 left->type = dataType;
 
                 if(tryPeek(TokenType::closeParenthesis)) consume();
@@ -332,8 +422,11 @@ class Parser {
         }
 
         std::optional<StatementNode*> parseStatement() {
-            if(tryPeek(TokenType::exit) && tryPeek(TokenType::openParenthesis, 1)) {
-                consume(); consume();
+            if(tryPeek(TokenType::exit)) {
+                consume();
+
+                if(!tryPeek(TokenType::openParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, '(');
+                consume();
 
                 auto exitNode = m_ArenaAllocator.allocate<ExitNode>();
 
@@ -358,8 +451,11 @@ class Parser {
 
                 return statementNode;
             }
-            else if(tryPeek(TokenType::print) && tryPeek(TokenType::openParenthesis, 1)) {
-                consume(); consume();
+            else if(tryPeek(TokenType::print)) {
+                consume();
+
+                if(!tryPeek(TokenType::openParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, '(');
+                consume();
 
                 auto printNode = m_ArenaAllocator.allocate<PrintNode>();
 
@@ -384,53 +480,156 @@ class Parser {
 
                 return statementNode;
             }
-            else if(tryPeek(TokenType::set) && tryPeek(TokenType::identifier, 2) && tryPeek(TokenType::assignment, 3)) {
+            else if(tryPeek(TokenType::set)) {
                 consume();
 
-                auto declarationNode = m_ArenaAllocator.allocate<DeclarationNode>();
-
-                switch(peek().value().type) {
-                    case TokenType::intType:
-                        declarationNode->type = DataType::Integer;
-                        break;
-                    case TokenType::boolType:
-                        declarationNode->type = DataType::Boolean;
-                        break;
-                    case TokenType::charType:
-                        declarationNode->type = DataType::Character;
-                        break;
-                    default:
-                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a data type after 'set'" << std::endl;
-                        exit(EXIT_FAILURE);
+                if(!peek().has_value()) {
+                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a data type after 'set'" << std::endl;
+                    exit(EXIT_FAILURE);
                 }
 
-                consume();
+                auto dataType = peek().value().type; consume();
 
-                declarationNode->identifier = consume();
-
-                consume();
-
-                if(auto expressionNode = parseExpression()) {
-                    declarationNode->expression = expressionNode.value();
-                }
-                else expectedExpressionError(peek(-1).value().lineNumber);
-
-                if(tryPeek(TokenType::semiCol)) {
+                if(tryPeek(TokenType::openBracket)) {
+                    auto declarationNode = m_ArenaAllocator.allocate<ArrayDeclarationNode>();
                     consume();
 
-                    auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
-                    statementNode->variant = declarationNode;
-                    statementNode->lineNumber = peek(-1).value().lineNumber;
+                    if(!tryPeek(TokenType::closeBracket)) expectedCharacterError(peek(-1).value().lineNumber, ']');
+                    consume();
 
-                    m_variables[declarationNode->identifier.value.value()] = declarationNode->type;
+                    switch(dataType) {
+                        case TokenType::intType:
+                            declarationNode->type = DataType::IntArray;
+                            break;
+                        case TokenType::boolType:
+                            declarationNode->type = DataType::BoolArray;
+                            break;
+                        case TokenType::charType:
+                            declarationNode->type = DataType::CharArray;
+                            break;
+                        default:
+                            std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a data type after 'set'" << std::endl;
+                            exit(EXIT_FAILURE);
+                    }
 
-                    return statementNode;
+                    if(!tryPeek(TokenType::identifier)) {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected variable identifier" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    declarationNode->identifier = consume();
+
+                    if(!tryPeek(TokenType::assignment)) expectedCharacterError(peek(-1).value().lineNumber, '=');
+                    consume();
+
+                    if(!tryPeek(TokenType::newKeyWord)) {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: expected 'new' before array allocation" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    if(!tryPeek(TokenType::arrayType)) {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: expected 'Array' after 'new'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    consume();
+
+                    if(!tryPeek(TokenType::openBracket)) expectedCharacterError(peek(-1).value().lineNumber, '[');
+                    consume();
+
+                    if(tryPeek(TokenType::intLiteral)) {
+                        int size = stoi(consume().value.value());
+
+                        if(size > 0) declarationNode->size = size;
+                        else {
+                            std::cerr << "Line " << peek().value().lineNumber << ": Error: Array size must be greater than zero" << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    else {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Array size must be an integer literal" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+
+                    if(!tryPeek(TokenType::closeBracket)) expectedCharacterError(peek(-1).value().lineNumber, ']');
+                    consume();
+
+                    if(tryPeek(TokenType::semiCol)) {
+                        consume();
+
+                        auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
+                        statementNode->variant = declarationNode;
+                        statementNode->lineNumber = peek(-1).value().lineNumber;
+
+                        m_variables[declarationNode->identifier.value.value()] = {.dataType = declarationNode->type, .size = std::to_string(declarationNode->size)};
+
+                        return statementNode;
+                    }
+                    else expectedCharacterError(peek(-1).value().lineNumber, ';');
                 }
-                else expectedCharacterError(peek(-1).value().lineNumber, ';');
+                else {
+                    auto declarationNode = m_ArenaAllocator.allocate<PrimitiveDeclarationNode>();
+
+                    switch(dataType) {
+                        case TokenType::intType:
+                            declarationNode->type = DataType::Integer;
+                            break;
+                        case TokenType::boolType:
+                            declarationNode->type = DataType::Boolean;
+                            break;
+                        case TokenType::charType:
+                            declarationNode->type = DataType::Character;
+                            break;
+                        default:
+                            std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a data type after 'set'" << std::endl;
+                            exit(EXIT_FAILURE);
+                    }
+
+                    if(!tryPeek(TokenType::identifier)) {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected variable identifier" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    declarationNode->identifier = consume();
+
+                    if(!tryPeek(TokenType::assignment)) expectedCharacterError(peek(-1).value().lineNumber, '=');
+                    consume();
+
+                    if(auto expressionNode = parseExpression()) {
+                        declarationNode->expression = expressionNode.value();
+                    }
+                    else expectedExpressionError(peek(-1).value().lineNumber);
+
+                    if(tryPeek(TokenType::semiCol)) {
+                        consume();
+
+                        auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
+                        statementNode->variant = declarationNode;
+                        statementNode->lineNumber = peek(-1).value().lineNumber;
+
+                        m_variables[declarationNode->identifier.value.value()].dataType = declarationNode->type;
+
+                        return statementNode;
+                    }
+                    else expectedCharacterError(peek(-1).value().lineNumber, ';');
+                }
             }
             else if(tryPeek(TokenType::identifier)) {
                 auto reAssignmentNode = m_ArenaAllocator.allocate<ReAssignmentNode>();
                 reAssignmentNode->identifier = consume();
+
+                bool isPrimitive = false;
+
+                if(tryPeek(TokenType::openBracket)) {
+                    consume();
+
+                    auto indexExpression = parseExpression();
+                    if(!indexExpression.has_value()) expectedExpressionError(peek(-1).value().lineNumber);
+                    reAssignmentNode->index = indexExpression.value();
+
+                    if(!tryPeek(TokenType::closeBracket)) expectedCharacterError(peek(-1).value().lineNumber, ']');
+                    consume();
+
+                    isPrimitive = true;
+                }
 
                 if(tryPeek(TokenType::assignment)) {
                     consume();
@@ -444,6 +643,13 @@ class Parser {
                             auto statementNode = m_ArenaAllocator.allocate<StatementNode>();
                             statementNode->variant = reAssignmentNode;
                             statementNode->lineNumber = peek(-1).value().lineNumber;
+
+                            if((getGroupType(m_variables[reAssignmentNode->identifier.value.value()].dataType) != GroupType::Primitive && !isPrimitive) ||
+                               getGroupType(reAssignmentNode->expression->type) != GroupType::Primitive) {
+                                std::cerr << "Line " << statementNode->lineNumber << ": Error: Cannot assign type '" << dataTypeToString(reAssignmentNode->expression->type)
+                                          << "' to type '" << dataTypeToString(m_variables[reAssignmentNode->identifier.value.value()].dataType) << "'" << std::endl;
+                                exit(EXIT_FAILURE);
+                            }
 
                             return statementNode;
                         }
@@ -549,20 +755,15 @@ class Parser {
                    program.statements.push_back(statement.value());
                 }
                 else {
-                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Couldn't parse statement" << std::endl;
+                    std::cerr << "Line " << peek().value().lineNumber << ": Error: Couldn't parse statement" << std::endl;
                     exit(EXIT_FAILURE);
                 }
             }
 
             return program;
-        }
+       }
 
     private:
-        const std::vector<Token> m_Tokens;
-        size_t m_Index = 0;
-        ArenaAllocator m_ArenaAllocator;
-        std::unordered_map<std::string, DataType> m_variables;
-
         [[nodiscard]] inline bool tryPeek(TokenType type, int ahead = 0) const {
             if(m_Index + ahead >= m_Tokens.size()) return false;
 
@@ -576,6 +777,27 @@ class Parser {
 
         inline Token consume() {
             return m_Tokens.at(m_Index++);
+        }
+
+        struct Variable {
+            DataType dataType;
+            std::optional<std::string> size;
+        };
+
+        GroupType getGroupType(DataType dataType) {
+            switch(dataType) {
+                case DataType::Integer:
+                case DataType::Boolean:
+                case DataType::Character:
+                case DataType::Empty:
+                    return GroupType::Primitive;
+                case DataType::IntArray:
+                case DataType::BoolArray:
+                case DataType::CharArray:
+                    return GroupType::Arrays;
+                default:
+                    return GroupType::None;
+            }
         }
 
         void expectedCharacterError(int lineNumber, char expectedCharacter) {
@@ -595,70 +817,28 @@ class Parser {
             exit(EXIT_FAILURE);
         }
 
-        std::string tokenToString(TokenType type) {
-            switch(type) {
-                case TokenType::exit:
-                    return "exit";
-                case TokenType::print:
-                    return "print";
-                case TokenType::intType:
+        std::string dataTypeToString(DataType dataType) {
+            switch(dataType) {
+                case DataType::Integer:
                     return "int";
-                case TokenType::boolType:
+                case DataType::Boolean:
                     return "bool";
-                case TokenType::charType:
+                case DataType::Character:
                     return "char";
-                case TokenType::set:
-                    return "set";
-                case TokenType::assignment:
-                    return "=";
-                case TokenType::semiCol:
-                    return ";";
-                case TokenType::openParenthesis:
-                    return "(";
-                case TokenType::closeParenthesis:
-                    return ")";
-                case TokenType::openCurlyBrace:
-                    return "{";
-                case TokenType::closeCurlyBrace:
-                    return "}";
-                case TokenType::addition:
-                    return "+";
-                case TokenType::subtraction:
-                    return "-";
-                case TokenType::multiplication:
-                    return "*";
-                case TokenType::division:
-                    return "/";
-                case TokenType::modulo:
-                    return "%";
-                case TokenType::lessThan:
-                    return "<";
-                case TokenType::greaterThan:
-                    return ">";
-                case TokenType::lessThanOrEqual:
-                    return "<=";
-                case TokenType::greaterThanOrEqual:
-                    return "=>";
-                case TokenType::equalTo:
-                    return "==";
-                case TokenType::notEqualTo:
-                    return "!=";
-                case TokenType::andOperator:
-                    return "and";
-                case TokenType::orOperator:
-                    return "or";
-                case TokenType::notOperator:
-                    return "not";
-                case TokenType::ifStatement:
-                    return "if";
-                case TokenType::elseIfStatement:
-                    return "else if";
-                case TokenType::elseStatement:
-                    return "else";
-                case TokenType::whileLoop:
-                    return "while";
-                default:
+                case DataType::IntArray:
+                    return "int[]";
+                case DataType::BoolArray:
+                    return "bool[]";
+                case DataType::CharArray:
+                    return "char[]";
+                case DataType::Empty:
+                case DataType::None:
                     return "";
             }
         }
+
+        const std::vector<Token> m_Tokens;
+        size_t m_Index = 0;
+        ArenaAllocator m_ArenaAllocator;
+        std::unordered_map<std::string, Variable> m_variables;
 };
