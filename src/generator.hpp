@@ -33,25 +33,37 @@ class Generator{
                 }
                 void operator()(const IndexedTerm* indexedTerm) const {
                     generator->generateExpression(indexedTerm->index);
-                    generator->pop("rax");
-
-                    generator->m_output << "    cmp rax, " << generator->m_variables[indexedTerm->identifier.value.value()].size.value() << "\n";
-                    generator->m_output << "    jge outOfBounds\n";
-                    generator->m_output << "    cmp rax, 0\n";
-                    generator->m_output << "    jl outOfBounds\n";
-
-                    generator->m_output << "    mov rbx, 8\n";
-
-                    generator->m_output << "    cqo\n";
-                    generator->m_output << "    imul rax,rbx\n";
+                    generator->pop("rcx");
 
                     int stackLocation = generator->m_variables[indexedTerm->identifier.value.value()].stackLocation;
+                    generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
+                    generator->m_output << "    mov r8, [rbx]\n";
 
-                    generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "\n";
+                    generator->m_output << "    cmp rcx, r8\n"
+                                           "    jg outOfBounds\n"
+                                           "    cmp rcx, 0\n"
+                                           "    jl outOfBounds\n";
 
-                    generator->push("[rsp + rax]");
+                    generator->m_output << "    add rcx, 1\n" // Account for header node
+                                           "    imul rcx, 8\n";
+
+                    generator->m_output << "    mov rax, [rbx + rcx]\n";
+                    generator->push("rax");
 
                     if(termExpression->isNegative) generator->convertToNegative();
+                }
+                void operator()(const PropertyTerm* propertyTerm) const {
+                    if(propertyTerm->property == TokenType::size) {
+                        int stackLocation = generator->m_variables[propertyTerm->identifier.value.value()].stackLocation;
+                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
+
+                        generator->m_output << "    mov rax, [rbx]\n"
+                                               "    add rax, 1\n";
+                        generator->push("rax");
+                    }
+                    else {
+
+                    }
                 }
                 void operator()(const ParenthesisTerm* parenthesisTerm) const {
                     generator->generateExpression(parenthesisTerm->expression);
@@ -252,19 +264,38 @@ class Generator{
                             .type = declarationNode->type}});
                 }
                 void operator()(const ArrayDeclarationNode* declarationNode) const {
-                    if(generator->m_variables.contains(declarationNode->identifier.value.value())) {
-                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '" << declarationNode->identifier.value.value() << "'" << std::endl;
+                    if (generator->m_variables.contains(declarationNode->identifier.value.value())) {
+                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '"
+                                  << declarationNode->identifier.value.value() << "'" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
-                    int size = declarationNode->size;
-                    generator->m_output << "    sub rsp, " << size * 8 << "\n";
-                    generator->m_stackSize += size;
+                    generator->generateExpression(declarationNode->size);
+                    generator->pop("rsi");
 
+                    generator->m_output << "    cmp rsi, 0\n"
+                                           "    jle invalidArraySize\n";
+
+                    generator->m_output << "    mov r12, rsi\n"; // Store size
+
+                    generator->m_output << "    add rsi, 1\n"; // Account for header node (size)
+                    generator->m_output << "    imul rsi, 8\n";
+
+                    generator->m_output << "    mov rdi, 0\n"
+                                           "    mov rdx, 0x3\n"
+                                           "    mov r10, 0x22\n"
+                                           "    mov r8, -1\n"
+                                           "    mov r9, 0\n"
+                                           "    mov rax, 9\n"
+                                           "    syscall\n";
+
+                    generator->m_output << "    sub r12, 1\n"
+                                           "    mov [rax], r12\n";
+
+                    generator->push("rax");
                     generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
                             .stackLocation = generator->m_stackSize,
-                            .type = getPrimitiveVariant(declarationNode->type),
-                            .size = size}});
+                            .type = getPrimitiveVariant(declarationNode->type)}});
                 }
                 void operator()(const ReAssignmentNode* reAssignmentNode) const {
                     if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value())) {
@@ -272,30 +303,33 @@ class Generator{
                         exit(EXIT_FAILURE);
                     }
 
-                    generator->generateExpression(reAssignmentNode->expression);
-
                     if(reAssignmentNode->index.has_value()) {
-                        generator->generateExpression(reAssignmentNode->index.value());
-                        generator->pop("rax");
-
-                        generator->m_output << "    cmp rax, " << generator->m_variables[reAssignmentNode->identifier.value.value()].size.value() << "\n";
-                        generator->m_output << "    jge outOfBounds\n";
-                        generator->m_output << "    cmp rax, 0\n";
-                        generator->m_output << "    jl outOfBounds\n";
-
-                        generator->m_output << "    mov rbx, 8\n";
-
-                        generator->m_output << "    cqo\n";
-                        generator->m_output << "    imul rax,rbx\n";
-
-                        generator->pop("rbx");
-
                         int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
+                        generator->m_output << "    mov rbx, [rsp + "
+                                            << std::to_string((generator->m_stackSize - stackLocation) * 8)
+                                            << "]\n";
+                        generator->m_output << "    mov r8, [rbx]\n";
 
-                        generator->m_output << "    add rax, " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "\n";
-                        generator->m_output << "    mov [rsp + rax], rbx\n";
+                        generator->generateExpression(reAssignmentNode->expression);
+                        generator->pop("r9");
+
+                        generator->generateExpression(reAssignmentNode->index.value());
+                        generator->pop("r10");
+
+                        generator->m_output << "    cmp r10, r8\n"
+                                               "    jg outOfBounds\n"
+                                               "    cmp r10, 0\n"
+                                               "    jl outOfBounds\n";
+
+                        generator->m_output << "    add r10, 1\n" // Account for header node
+                                               "    imul r10, 8\n";
+
+                        generator->m_output << "    mov rax, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
+
+                        generator->m_output << "    mov [rax + r10], r9\n";
                     }
                     else {
+                        generator->generateExpression(reAssignmentNode->expression);
                         generator->pop("rax");
                         generator->boundVariable(
                                 generator->m_variables[reAssignmentNode->identifier.value.value()].type);
@@ -384,9 +418,19 @@ class Generator{
                         "    mov rdi, 1\n"
                         "    mov rsi, oobMsg\n"
                         "    mov rdx, 33\n"
-                        "    syscall\n";
+                        "    syscall\n"
+                        "    jmp errorExit\n";
 
+            m_output << "invalidArraySize:\n";
             m_output << "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, negSizeArray\n"
+                        "    mov rdx, 44\n"
+                        "    syscall\n"
+                        "    jmp errorExit\n";
+
+            m_output << "errorExit:\n"
+                        "    mov rax, 1\n"
                         "    mov rdi, 1\n"
                         "    mov rsi, exitMsg\n"
                         "    mov rdx, 32\n"
@@ -406,6 +450,7 @@ class Generator{
             m_output << "section .data\n"
                         "    exitMsg db \"Process finished with exit code \"\n"
                         "    oobMsg db \"Error: Array index out of bounds\", 10\n"
+                        "    negSizeArray db \"Error: Array size must be greater than zero\", 10\n"
                         "    trueString db \"True\"\n"
                         "    falseString db \"False\"\n"
                         "    newLine db 10\n"
@@ -499,7 +544,8 @@ class Generator{
             m_output << "boundBool:\n"
                         "    cmp rax, 0\n"
                         "    setne al\n"
-                        "    movzx rax, al\n\n";
+                        "    movzx rax, al\n"
+                        "    ret\n\n";
 
             m_output << "boundChar:\n"
                         "    mov rbx, 128\n"
@@ -569,7 +615,6 @@ class Generator{
             int scopeDepth;
             size_t stackLocation;
             DataType type;
-            std::optional<int> size;
         };
 
         const ProgramNode m_program;

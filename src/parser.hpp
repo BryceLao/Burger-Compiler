@@ -29,6 +29,11 @@ struct IndexedTerm {
     ExpressionNode* index;
 };
 
+struct PropertyTerm {
+    Token identifier;
+    TokenType property;
+};
+
 struct OperationExpressionNode {
     ExpressionNode* left;
     ExpressionNode* right;
@@ -47,7 +52,7 @@ struct TermExpressionNode {
     DataType type;
     bool isNegative;
     int lineNumber;
-    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, ParenthesisTerm*, DummyTerm*> variant;
+    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, PropertyTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
 struct ExpressionNode {
@@ -75,7 +80,7 @@ struct PrimitiveDeclarationNode {
 struct ArrayDeclarationNode {
     Token identifier;
     DataType type;
-    int size;
+    ExpressionNode* size;
 };
 
 struct ReAssignmentNode {
@@ -152,7 +157,7 @@ class Parser {
 
                 if(m_variables.find(term.value.value()) != m_variables.end()) {
                     if(tryPeek(TokenType::openBracket))  {
-                        if(getGroupType(m_variables[term.value.value()].dataType) == GroupType::Primitive) {
+                        if(getGroupType(m_variables[term.value.value()]) == GroupType::Primitive) {
                             std::cerr << "Line " << peek().value().lineNumber << ": Error: Cannot index non-array variable '" << term.value.value() << "'"  << std::endl;
                             exit(EXIT_FAILURE);
                         }
@@ -171,7 +176,7 @@ class Parser {
 
                         auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                         termExpression->variant = indexedTerm;
-                        termExpression->type = getPrimitiveVariant(m_variables[term.value.value()].dataType);
+                        termExpression->type = getPrimitiveVariant(m_variables[term.value.value()]);
                         termExpression->lineNumber = peek(-1).value().lineNumber;
 
                         return termExpression;
@@ -188,16 +193,14 @@ class Parser {
                             if(!tryPeek(TokenType::closeParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, ')');
                             consume();
 
-                            auto literalExpression = m_ArenaAllocator.allocate<LiteralTerm>();
-                            Token token = {.type = TokenType::intLiteral, .lineNumber = term.lineNumber,
-                                           .value = m_variables[term.value.value()].size.value()};
-
-                            literalExpression->literal = token;
+                            auto propertyTerm = m_ArenaAllocator.allocate<PropertyTerm>();
+                            propertyTerm->identifier = term;
+                            propertyTerm->property = TokenType::size;
 
                             auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
-                            termExpression->variant = literalExpression;
+                            termExpression->variant = propertyTerm;
                             termExpression->type = DataType::Integer;
-                            termExpression->lineNumber = token.lineNumber;
+                            termExpression->lineNumber = term.lineNumber;
 
                             return termExpression;
                         }
@@ -212,7 +215,7 @@ class Parser {
 
                         auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
                         termExpression->variant = identifierTerm;
-                        termExpression->type = m_variables[term.value.value()].dataType;
+                        termExpression->type = m_variables[term.value.value()];
                         termExpression->lineNumber = peek(-1).value().lineNumber;
 
                         return termExpression;
@@ -536,19 +539,10 @@ class Parser {
                     if(!tryPeek(TokenType::openBracket)) expectedCharacterError(peek(-1).value().lineNumber, '[');
                     consume();
 
-                    if(tryPeek(TokenType::intLiteral)) {
-                        int size = stoi(consume().value.value());
-
-                        if(size > 0) declarationNode->size = size;
-                        else {
-                            std::cerr << "Line " << peek().value().lineNumber << ": Error: Array size must be greater than zero" << std::endl;
-                            exit(EXIT_FAILURE);
-                        }
+                    if(auto expressionNode = parseExpression()) {
+                        declarationNode->size = expressionNode.value();
                     }
-                    else {
-                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Array size must be an integer literal" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else expectedExpressionError(peek(-1).value().lineNumber);
 
                     if(!tryPeek(TokenType::closeBracket)) expectedCharacterError(peek(-1).value().lineNumber, ']');
                     consume();
@@ -560,7 +554,7 @@ class Parser {
                         statementNode->variant = declarationNode;
                         statementNode->lineNumber = peek(-1).value().lineNumber;
 
-                        m_variables[declarationNode->identifier.value.value()] = {.dataType = declarationNode->type, .size = std::to_string(declarationNode->size)};
+                        m_variables[declarationNode->identifier.value.value()] = declarationNode->type;
 
                         return statementNode;
                     }
@@ -605,7 +599,7 @@ class Parser {
                         statementNode->variant = declarationNode;
                         statementNode->lineNumber = peek(-1).value().lineNumber;
 
-                        m_variables[declarationNode->identifier.value.value()].dataType = declarationNode->type;
+                        m_variables[declarationNode->identifier.value.value()] = declarationNode->type;
 
                         return statementNode;
                     }
@@ -644,10 +638,10 @@ class Parser {
                             statementNode->variant = reAssignmentNode;
                             statementNode->lineNumber = peek(-1).value().lineNumber;
 
-                            if((getGroupType(m_variables[reAssignmentNode->identifier.value.value()].dataType) != GroupType::Primitive && !isPrimitive) ||
+                            if((getGroupType(m_variables[reAssignmentNode->identifier.value.value()]) != GroupType::Primitive && !isPrimitive) ||
                                getGroupType(reAssignmentNode->expression->type) != GroupType::Primitive) {
                                 std::cerr << "Line " << statementNode->lineNumber << ": Error: Cannot assign type '" << dataTypeToString(reAssignmentNode->expression->type)
-                                          << "' to type '" << dataTypeToString(m_variables[reAssignmentNode->identifier.value.value()].dataType) << "'" << std::endl;
+                                          << "' to type '" << dataTypeToString(m_variables[reAssignmentNode->identifier.value.value()]) << "'" << std::endl;
                                 exit(EXIT_FAILURE);
                             }
 
@@ -779,11 +773,6 @@ class Parser {
             return m_Tokens.at(m_Index++);
         }
 
-        struct Variable {
-            DataType dataType;
-            std::optional<std::string> size;
-        };
-
         GroupType getGroupType(DataType dataType) {
             switch(dataType) {
                 case DataType::Integer:
@@ -840,5 +829,5 @@ class Parser {
         const std::vector<Token> m_Tokens;
         size_t m_Index = 0;
         ArenaAllocator m_ArenaAllocator;
-        std::unordered_map<std::string, Variable> m_variables;
+        std::unordered_map<std::string, DataType> m_variables;
 };

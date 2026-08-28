@@ -1,19 +1,24 @@
-set char[] a = new Array[26];
+set char[] a = new Array[5];
+set char[] b = new Array[a.size() * 2 - 1];
 
 set char curChar = 'a';
 set int counter = 0;
 
-while counter < 26 {
+while counter < 5 {
     a[counter] = curChar;
     counter = counter + 1;
     curChar = curChar + 1;
+    print(counter);
 }
 
 counter = 0;
 
-while counter < 26 {
+while counter < 5 {
     print(a[counter]);
     counter = counter + 1;
 }
 
 print(counter);
+
+print(a.size());
+print(b.size());
