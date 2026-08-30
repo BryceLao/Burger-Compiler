@@ -12,6 +12,8 @@ enum class TokenType {
     boolType,
     charLiteral,
     charType,
+    stringType,
+    stringLiteral,
     arrayType,
     identifier,
     set,
@@ -42,7 +44,8 @@ enum class TokenType {
     elseStatement,
     whileLoop,
     dot,
-    size
+    size,
+    length
 };
 
 enum class DataType {
@@ -52,7 +55,15 @@ enum class DataType {
     IntArray,
     BoolArray,
     CharArray,
+    String,
     Empty,
+    None
+};
+
+enum class GroupType {
+    Primitive,
+    Arrays,
+    Strings,
     None
 };
 
@@ -69,6 +80,24 @@ DataType getPrimitiveVariant(DataType dataType) {
     }
 }
 
+GroupType getGroupType(DataType dataType) {
+    switch(dataType) {
+        case DataType::Integer:
+        case DataType::Boolean:
+        case DataType::Character:
+        case DataType::Empty:
+            return GroupType::Primitive;
+        case DataType::IntArray:
+        case DataType::BoolArray:
+        case DataType::CharArray:
+            return GroupType::Arrays;
+        case DataType::String:
+            return GroupType::Strings;
+        default:
+            return GroupType::None;
+    }
+}
+
 std::string tokenToString(TokenType type) {
     switch(type) {
         case TokenType::exit:
@@ -81,6 +110,8 @@ std::string tokenToString(TokenType type) {
             return "bool";
         case TokenType::charType:
             return "char";
+        case TokenType::stringType:
+            return "string";
         case TokenType::newKeyWord:
             return "new";
         case TokenType::arrayType:

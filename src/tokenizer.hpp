@@ -82,6 +82,10 @@ class Tokenizer {
                         tokens.push_back({.type = TokenType::charType, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
+                    else if(buffer == "string") {
+                        tokens.push_back({.type = TokenType::stringType, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
                     else if(buffer == "True") {
                         tokens.push_back({.type = TokenType::boolLiteral, .lineNumber = curLineNumber, .value = "1"});
                         buffer.clear();
@@ -134,9 +138,37 @@ class Tokenizer {
                         tokens.push_back({.type = TokenType::size, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
+                    else if(buffer == "length") {
+                        tokens.push_back({.type = TokenType::length, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
                     else {
                         tokens.push_back({.type = TokenType::identifier, .lineNumber = curLineNumber, .value = buffer});
                         buffer.clear();
+                    }
+                }
+                else if(c == '\"') {
+                    consume();
+
+                    while(peek().has_value() && peek().value() != '\"') {
+                        buffer.push_back(consume());
+                    }
+
+                    if(peek().has_value()) {
+                        if(!tryPeek('\"')) {
+                            std::cerr << "Line " << curLineNumber << ": Error: Expected \" but found " << peek(2).value() << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                        else {
+                            consume();
+
+                            tokens.push_back({.type = TokenType::stringLiteral, .lineNumber = curLineNumber, .value = buffer});
+                            buffer.clear();
+                        }
+                    }
+                    else {
+                        std::cerr << "Line " << curLineNumber << ": Error: Expected \" but found none" << std::endl;
+                        exit(EXIT_FAILURE);
                     }
                 }
                 else if(std::isdigit(c)) {
@@ -188,12 +220,19 @@ class Tokenizer {
                     tokens.push_back({.type = TokenType::notEqualTo, .lineNumber = curLineNumber});
                 }
                 else if(c == '\'') {
-                    if(!tryPeek('\'',2)) {
-                        std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found " << peek(2).value() << std::endl;
+                    consume();
+
+                    if(peek(1).has_value()) {
+                        if(!tryPeek('\'', 1)) {
+                            std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found " << peek(1).value() << std::endl;
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    else {
+                        std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found none" << std::endl;
                         exit(EXIT_FAILURE);
                     }
 
-                    consume();
                     tokens.push_back({.type = TokenType::charLiteral, .lineNumber = curLineNumber, .value = std::to_string(static_cast<int>(peek().value()))});
                     consume(); consume();
                 }
