@@ -29,7 +29,7 @@ class Generator{
                         generator->push("rax");
 
                         if (termExpression->isNegative) {
-                            std::cerr << "Line " << termExpression->lineNumber << ": Error: Unary '-' to type 'string'" << std::endl;
+                            std::cerr << "Line " << termExpression->lineNumber << ": Error: Unary '-' cannot be applied to type 'string'" << std::endl;
                             exit(EXIT_FAILURE);
                         }
                     }
@@ -60,7 +60,7 @@ class Generator{
                     generator->m_output << "    mov r8, [rbx]\n";
 
                     generator->m_output << "    cmp rcx, r8\n"
-                                           "    jg outOfBounds\n"
+                                           "    jge outOfBounds\n"
                                            "    cmp rcx, 0\n"
                                            "    jl outOfBounds\n";
 
@@ -77,8 +77,7 @@ class Generator{
                         int stackLocation = generator->m_variables[propertyTerm->identifier.value.value()].stackLocation;
                         generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
 
-                        generator->m_output << "    mov rax, [rbx]\n"
-                                               "    add rax, 1\n";
+                        generator->m_output << "    mov rax, [rbx]\n";
                         generator->push("rax");
 
                         if(termExpression->isNegative) generator->convertToNegative();
@@ -86,6 +85,47 @@ class Generator{
                     else {
                         std::cerr << "Line " << termExpression->lineNumber << ": Internal compiler error: Unknown property" << std::endl;
                         exit(EXIT_FAILURE);
+                    }
+                }
+                void operator()(const MethodTerm* methodTerm) const {
+                    if(methodTerm->method.type == TokenType::stoi) {
+                        generator->generateExpression(methodTerm->expression);
+                        generator->pop("r11");
+
+                        generator->m_output << "    call stringToInt\n";
+
+                        generator->push("r8");
+                    }
+                    else if(methodTerm->method.type == TokenType::toString) {
+                        generator->generateExpression(methodTerm->expression);
+                        generator->pop("r12");
+
+                        switch (methodTerm->expression->type) {
+                            case DataType::Integer:
+                                generator->m_output << "    call intToString\n";
+                                break;
+                            case DataType::Boolean:
+                                generator->m_output << "    mov rsi, 16\n"
+                                                       "    call allocateMemory\n"
+                                                       "    mov [rax], 1\n"
+                                                       "    mov [rax + 8], r12\n";
+                                break;
+                            case DataType::Character:
+                                generator->m_output << "    mov rsi, 16\n"
+                                                       "    call allocateMemory\n"
+                                                       "    mov [rax], 1\n"
+                                                       "    mov [rax + 8], r12\n";
+                                break;
+                            default:
+                                std::cerr << "Line " << termExpression->lineNumber << ": Error: Cannot convert type '"
+                                          << dataTypeToString(methodTerm->expression->type) << "' into 'string'" << std::endl;
+                                exit(EXIT_FAILURE);
+                        }
+
+                        generator->push("rax");
+                    }
+                    else {
+
                     }
                 }
                 void operator()(const ParenthesisTerm* parenthesisTerm) const {
@@ -283,6 +323,8 @@ class Generator{
                                               << ": Internal compiler error: Unknown operator" << std::endl;
                                     exit(EXIT_FAILURE);
                             }
+
+                            generator->boundVariable(expression->type);
                         }
                     }
                     else {
@@ -323,13 +365,22 @@ class Generator{
 
                     switch(printNode->expression->type) {
                         case DataType::Integer:
-                            generator->m_output << "    call printInt\n";
-                            break;
                         case DataType::Boolean:
-                            generator->m_output << "    call printBool\n";
+                            generator->pop("r12");
+                            generator->m_output << "    call intToString\n";
+                            generator->push("rax");
+                            generator->m_output << "    call printString\n";
+                            generator->pop("rax");
                             break;
                         case DataType::Character:
-                            generator->m_output << "    call printChar\n";
+                            generator->pop("r12");
+                            generator->m_output << "    mov rsi, 16\n"
+                                                   "    call allocateMemory\n"
+                                                   "    mov [rax], 1\n"
+                                                   "    mov [rax + 8], r12\n";
+                            generator->push("rax");
+                            generator->m_output << "    call printString\n";
+                            generator->pop("rax");
                             break;
                         case DataType::String:
                             generator->m_output << "    call printString\n";
@@ -391,8 +442,7 @@ class Generator{
 
                         generator->m_output << "    call allocateMemory\n";
 
-                        generator->m_output << "    sub r12, 1\n"
-                                               "    mov [rax], r12\n";
+                        generator->m_output << "    mov [rax], r12\n";
 
                         generator->push("rax");
                         generator->m_variables.insert({declarationNode->identifier.value.value(), Variable {.scopeDepth = generator->m_scopeDepth,
@@ -417,23 +467,23 @@ class Generator{
                                             << "]\n";
                         generator->m_output << "    mov r8, [rbx]\n";
 
-                        generator->generateExpression(reAssignmentNode->expression);
-                        generator->pop("r9");
-
                         generator->generateExpression(reAssignmentNode->index.value());
+
+                        generator->generateExpression(reAssignmentNode->expression);
+                        generator->pop("rax");
+                        generator->boundVariable(getPrimitiveVariant(generator->m_variables[reAssignmentNode->identifier.value.value()].type));
                         generator->pop("r10");
 
                         generator->m_output << "    cmp r10, r8\n"
-                                               "    jg outOfBounds\n"
+                                               "    jge outOfBounds\n"
                                                "    cmp r10, 0\n"
                                                "    jl outOfBounds\n";
 
                         generator->m_output << "    add r10, 1\n" // Account for header node
                                                "    imul r10, 8\n";
 
-                        generator->m_output << "    mov rax, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
-
-                        generator->m_output << "    mov [rax + r10], r9\n";
+                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
+                        generator->m_output << "    mov [rbx + r10], rax\n";
                     }
                     else {
                         generator->generateExpression(reAssignmentNode->expression);
@@ -558,8 +608,7 @@ class Generator{
                         "    exitMsg db \"Process finished with exit code \"\n"
                         "    oobMsg db \"Error: Array index out of bounds\", 10\n"
                         "    negSizeArray db \"Error: Array size must be greater than zero\", 10\n"
-                        "    trueString db \"True\"\n"
-                        "    falseString db \"False\"\n"
+                        "    invalidStoiArg db \"Error: Invalid integer string: string must contain only digits (0-9), with an optional leading '-'\", 10\n"
                         "    newLine db 10\n"
                         "\n";
         }
@@ -567,86 +616,7 @@ class Generator{
         void generateUtil() {
             m_output << "\n\n\n ; Util Functions \n\n\n";
 
-            m_output << "\nprintInt:\n"
-                        "    mov rbx, 1\n"
-                        "    mov rax, 10\n"   // New Line Character
-                        "    push rax\n"
-                        "    mov rax, [rsp + 16]\n"
-                        "    mov rcx, 10\n"
-                        "    cmp rax, 0\n"
-                        "    jge positiveInt\n"
-                        "    imul rax, -1\n"
-                        "    mov r8, 1\n" // Flag for if number is negative
-                        "    positiveInt:\n"
-                        "   \n"
-                        "    divLoop:\n"
-                        "        xor rdx, rdx\n"
-                        "        div rcx\n"
-                        "        add rbx, 1\n"
-                        "        add rdx, '0'\n"
-                        "        push rdx\n"
-                        "        cmp rax, 0\n"
-                        "        jg divLoop\n"
-                        "   \n"
-                        "    cmp r8, 1\n"
-                        "    jne printIntLoop\n"
-                        "    mov rax, 45\n" // Add negative character to print queue
-                        "    push rax\n"
-                        "    add rbx, 1\n"
-                        "    xor r8, r8\n"
-                        "    printIntLoop:\n"
-                        "        call printASCII\n"
-                        "        pop rax\n"
-                        "        sub rbx, 1\n"
-                        "        cmp rbx, 0\n"
-                        "        jg printIntLoop\n"
-                        "   \n"
-                        "    ret\n"
-                        "\n"
-                        "printASCII:\n"
-                        "    mov rax, 1\n"
-                        "    mov rdi, 1\n"
-                        "    lea rsi, [rsp + 8]\n"
-                        "    mov rdx, 1\n"
-                        "    syscall\n"
-                        "    ret\n";
-
-            m_output << "\nprintBool:\n"
-                        "    mov rax, 1\n"
-                        "    mov rdi, 1\n"
-                        "    mov rsi, [rsp + 8]\n"
-                        "    cmp rsi, 0\n"
-                        "    je falseStatement\n"
-                        "    trueStatement:\n"
-                        "        mov rsi, trueString\n"
-                        "        mov rdx, 4\n"
-                        "        jmp endFunction\n"
-                        "    falseStatement:\n"
-                        "        mov rsi, falseString\n"
-                        "        mov rdx, 5\n"
-                        "   endFunction:\n"
-                        "        syscall\n"
-                        "        mov rax, 1\n"
-                        "        mov rdi, 1\n"
-                        "        mov rsi, newLine\n"
-                        "        mov rdx, 1\n"
-                        "        syscall\n"
-                        "   \n"
-                        "    ret\n";
-
-            m_output << "\nprintChar:\n"
-                        "    mov rax, 1\n"
-                        "    mov rdi, 1\n"
-                        "    lea rsi, [rsp + 8]\n"
-                        "    mov rdx, 1\n"
-                        "    syscall\n"
-                        "    mov rax, 1\n"
-                        "    mov rdi, 1\n"
-                        "    mov rsi, newLine\n"
-                        "    mov rdx, 1\n"
-                        "    syscall\n"
-                        "    ret\n";
-
+            // The address to the string must be stored at the top of the stack before calling
             m_output << "\nprintString:\n"
                         "    mov r8, [rsp + 8]\n"
                         "    mov rbx, [r8]\n"
@@ -671,12 +641,16 @@ class Generator{
                         "        syscall\n"
                         "        ret\n";
 
+            // Boolean must be stored in rax before calling
+            // Returns the boolean in rax
             m_output << "\nboundBool:\n"
                         "    cmp rax, 0\n"
                         "    setne al\n"
                         "    movzx rax, al\n"
                         "    ret\n";
 
+            // Char must be stored in rax before calling
+            // Returns the char in rax
             m_output << "\nboundChar:\n"
                         "    mov rbx, 128\n"
                         "    cqo\n"
@@ -688,7 +662,8 @@ class Generator{
                         "        mov rax, rdx\n"
                         "    ret\n";
 
-            m_output << "\nallocateMemory:\n" // Length/Size should be moved to rsi before calling
+            // Allocation size must be stored in rsi before calling (in bytes)
+            m_output << "\nallocateMemory:\n"
                         "    mov rdi, 0\n"
                         "    mov rdx, 0x3\n"
                         "    mov r10, 0x22\n"
@@ -698,21 +673,24 @@ class Generator{
                         "    syscall\n"
                         "    ret\n";
 
+            // Old address must be stored in r12, and new address in rax before calling
             m_output << "\nfillMemory:\n"
-                        "    mov rbx, [r12]\n" // Place old address in r12
+                        "    mov rbx, [r12]\n"
                         "    mov rcx, 8\n"
                         "\n"
                         "    fillLoop:\n"
                         "        cmp rbx, 0\n"
                         "        jle doneFilling\n"
                         "        mov rdx, [r12 + rcx]\n"
-                        "        mov [rax + rcx], rdx\n" // Place new address in rax
+                        "        mov [rax + rcx], rdx\n"
                         "        sub rbx, 1\n"
                         "        add rcx, 8\n"
                         "        jmp fillLoop\n"
                         "    doneFilling:\n"
                         "        ret\n";
 
+            // Left string address must be stored in r14, and right string address in r15 before calling
+            // Returns the boolean in rax
             m_output << "\ncmpStringEq:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
@@ -737,6 +715,8 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
+            // Left string address must be stored in r14, and right string address in r15 before calling
+            // Returns the boolean in rax
             m_output << "\ncmpStringGt:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
@@ -762,6 +742,8 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
+            // Left string address must be stored in r14, and right string address in r15 before calling
+            // Returns the boolean in rax
             m_output << "\ncmpStringLt:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
@@ -779,12 +761,135 @@ class Generator{
                         "        jg greaterEqual\n"
                         "        add rbx, 1\n"
                         "        add rcx, 8\n"
-                        "        jmp cmpGtLoop\n"
+                        "        jmp cmpLtLoop\n"
                         "    less:\n"
                         "        mov rax, 1\n"
                         "        ret\n"
                         "    greaterEqual:\n"
                         "        mov rax, 0\n"
+                        "        ret\n";
+
+            // String address must be stored in r11 before calling
+            // Returns the integer in r8
+            m_output << "\nstringToInt:\n"
+                        "    mov r12, [r11]\n"
+                        "    mov r13, 8\n"
+                        "    mov r14, 10\n"
+                        "    cmp r12, 0\n"
+                        "    je stoiEmptyString\n"
+                        "    mov rdx, [r11 + 8]\n"
+                        "    cmp rdx, 45\n"
+                        "    jne stoiIsPositive\n"
+                        "    sub r12, 1\n"
+                        "    add r13, 8\n"
+                        "    stoiIsPositive:\n"
+                        "    mov r8, 0\n"
+                        "    mov rax, 1\n"
+                        "    mov rbx, r12\n"
+                        "    mov rcx, r13\n"
+                        "    stoiCheckLoop:\n"
+                        "        cmp rbx, 0\n"
+                        "        jle stoiDoneChecking\n"
+                        "        mov rdx, [r11 + rcx]\n"
+                        "        cmp rdx, 48\n"
+                        "        jl stoiInvalidString\n"
+                        "        cmp rdx, 57\n"
+                        "        jg stoiInvalidString\n"
+                        "        sub rbx, 1\n"
+                        "        add rcx, 8\n"
+                        "        imul rax, 10\n"
+                        "        jmp stoiCheckLoop\n"
+                        "    stoiDoneChecking:\n"
+                        "        mov rbx, r12\n"
+                        "        mov rcx, r13\n"
+                        "        cqo\n"
+                        "        idiv r14\n"
+                        "    stoiConvertLoop:\n"
+                        "        cmp rbx, 0\n"
+                        "        jle stoiDoneConverting\n"
+                        "        mov r10, [r11 + rcx]\n"
+                        "        sub r10, 48\n"
+                        "        imul r10, rax\n"
+                        "        add r8, r10\n"
+                        "        cqo\n"
+                        "        idiv r14\n"
+                        "        sub rbx, 1\n"
+                        "        add rcx, 8\n"
+                        "        jmp stoiConvertLoop\n"
+                        "    stoiDoneConverting:\n"
+                        "    cmp r13, 16\n"
+                        "    jne stoiDontTurnNegative\n"
+                        "    imul r8, -1\n"
+                        "    stoiDontTurnNegative:\n"
+                        "        ret\n"
+                        "    stoiEmptyString:\n"
+                        "        mov r8, 0\n"
+                        "        ret\n"
+                        "    stoiInvalidString:\n"
+                        "        mov rax, 1\n"
+                        "        mov rdi, 1\n"
+                        "        mov rsi, invalidStoiArg\n"
+                        "        mov rdx, 99\n"
+                        "        syscall\n"
+                        "        mov rax, 1\n"
+                        "        mov rdi, 1\n"
+                        "        mov rsi, exitMsg\n"
+                        "        mov rdx, 32\n"
+                        "        syscall\n"
+                        "        mov rax, 60\n"
+                        "        mov rdi, 1\n"
+                        "        syscall\n";
+
+            // Integer value must be stored in r12 before calling
+            // Returns the string address in rax
+            m_output << "\nintToString:\n"
+                        "    mov rax, r12\n"
+                        "    mov rbx, 0\n"
+                        "    mov rcx, 10\n"
+                        "    mov r15, 0\n"
+                        "    cmp rax, 0\n"
+                        "    jne intToStringNotZero\n"
+                        "    mov rdx, 48\n"
+                        "    push rdx\n"
+                        "    mov rbx, 1\n"
+                        "    jmp intToStringDoneConverting\n"
+                        "    intToStringNotZero:\n"
+                        "    cmp rax, 0\n"
+                        "    jge intToStringIsPositive\n"
+                        "    mov r15, 1\n"
+                        "    imul rax, -1\n"
+                        "    intToStringIsPositive:\n"
+                        "    intToStringConvertLoop:\n"
+                        "        cmp rax, 0\n"
+                        "        jle intToStringDoneConverting\n"
+                        "        cqo\n"
+                        "        idiv rcx\n"
+                        "        add rdx, 48\n"
+                        "        push rdx\n"
+                        "        add rbx, 1\n"
+                        "        jmp intToStringConvertLoop\n"
+                        "    intToStringDoneConverting:\n"
+                        "        cmp r15, 0\n"
+                        "        je intToStringDontAddNegative\n"
+                        "        mov rdx, 45\n"
+                        "        push rdx\n"
+                        "        add rbx, 1\n"
+                        "        intToStringDontAddNegative:\n"
+                        "        mov rsi, rbx\n"
+                        "        add rsi, 1\n"
+                        "        imul rsi, 8\n"
+                        "        call allocateMemory\n"
+                        "        mov rcx, 8\n"
+                        "        mov [rax], rbx\n"
+                        "    intToStringFillString:\n"
+                        "        cmp rbx, 0\n"
+                        "        jle intToStringDoneFilling\n"
+                        "        pop rdx\n"
+                        "        mov [rax + rcx], rdx\n"
+                        "        sub rbx, 1\n"
+                        "        add rcx, 8\n"
+                        "        jmp intToStringFillString\n"
+                        "    intToStringDoneFilling:\n"
                         "        ret\n";
         }
 
@@ -824,10 +929,10 @@ class Generator{
                 case DataType::Integer:
                     break;
                 case DataType::Boolean:
-                    m_output << "   call boundBool\n";
+                    m_output << "    call boundBool\n";
                     break;
                 case DataType::Character:
-                    m_output << "   call boundChar\n";
+                    m_output << "    call boundChar\n";
                     break;
                 default:
                     break;
@@ -835,9 +940,9 @@ class Generator{
         }
 
         void convertToNegative() {
-            m_output << "   pop rax\n";
-            m_output << "   imul rax, -1\n";
-            m_output << "   push rax\n";
+            m_output << "    pop rax\n";
+            m_output << "    imul rax, -1\n";
+            m_output << "    push rax\n";
         }
 
         struct Variable{

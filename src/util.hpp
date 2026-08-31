@@ -45,7 +45,9 @@ enum class TokenType {
     whileLoop,
     dot,
     size,
-    length
+    length,
+    toString,
+    stoi
 };
 
 enum class DataType {
@@ -74,6 +76,7 @@ DataType getPrimitiveVariant(DataType dataType) {
         case DataType::BoolArray:
             return DataType::Boolean;
         case DataType::CharArray:
+        case DataType::String:
             return DataType::Character;
         default:
             return DataType::None;
@@ -95,6 +98,28 @@ GroupType getGroupType(DataType dataType) {
             return GroupType::Strings;
         default:
             return GroupType::None;
+    }
+}
+
+std::string dataTypeToString(DataType dataType) {
+    switch(dataType) {
+        case DataType::Integer:
+            return "int";
+        case DataType::Boolean:
+            return "bool";
+        case DataType::Character:
+            return "char";
+        case DataType::String:
+            return "string";
+        case DataType::IntArray:
+            return "int[]";
+        case DataType::BoolArray:
+            return "bool[]";
+        case DataType::CharArray:
+            return "char[]";
+        case DataType::Empty:
+        case DataType::None:
+            return "";
     }
 }
 
@@ -173,6 +198,8 @@ std::string tokenToString(TokenType type) {
         case TokenType::dot:
             return ".";
         case TokenType::size:
+            return "size";
+        case TokenType::length:
             return "size";
         default:
             return "";

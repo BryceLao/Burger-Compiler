@@ -142,6 +142,14 @@ class Tokenizer {
                         tokens.push_back({.type = TokenType::length, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
+                    else if(buffer == "toString") {
+                        tokens.push_back({.type = TokenType::toString, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "stoi") {
+                        tokens.push_back({.type = TokenType::stoi, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
                     else {
                         tokens.push_back({.type = TokenType::identifier, .lineNumber = curLineNumber, .value = buffer});
                         buffer.clear();

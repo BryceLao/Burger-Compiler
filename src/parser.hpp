@@ -27,6 +27,11 @@ struct PropertyTerm {
     TokenType property;
 };
 
+struct MethodTerm {
+    Token method;
+    ExpressionNode* expression;
+};
+
 struct OperationExpressionNode {
     ExpressionNode* left;
     ExpressionNode* right;
@@ -45,7 +50,7 @@ struct TermExpressionNode {
     DataType type;
     bool isNegative;
     int lineNumber;
-    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, PropertyTerm*, ParenthesisTerm*, DummyTerm*> variant;
+    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, PropertyTerm*, MethodTerm*, ParenthesisTerm*, DummyTerm*> variant;
 };
 
 struct ExpressionNode {
@@ -234,6 +239,51 @@ class Parser {
                     exit(EXIT_FAILURE);
                 }
             }
+            else if(tryPeek(TokenType::toString) || tryPeek(TokenType::stoi)) {
+                auto methodTerm = m_ArenaAllocator.allocate<MethodTerm>();
+                methodTerm->method = consume();
+
+                if(!tryPeek(TokenType::openParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, '(');
+                consume();
+
+                if(auto expression = parseExpression()) methodTerm->expression = expression.value();
+                else expectedExpressionError(peek(-1).value().lineNumber);
+
+                if(!tryPeek(TokenType::closeParenthesis)) expectedCharacterError(peek(-1).value().lineNumber, ')');
+                consume();
+
+                GroupType expectedDataType;
+                DataType newDataType;
+
+                switch(methodTerm->method.type) {
+                    case TokenType::toString:
+                        expectedDataType = GroupType::Primitive;
+                        newDataType = DataType::String;
+                        break;
+                    case TokenType::stoi:
+                        expectedDataType = GroupType::Strings;
+                        newDataType = DataType::Integer;
+                        break;
+                    default:
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Internal compiler error: Unknown method '"
+                            << tokenToString(methodTerm->method.type) << "'" << std::endl;
+                        exit(EXIT_FAILURE);
+                }
+
+                if(expectedDataType != getGroupType(methodTerm->expression->type)) {
+                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error method '"
+                              << tokenToString(methodTerm->method.type) << "' cannot be used with type '"
+                              << dataTypeToString(methodTerm->expression->type) << "'" << std::endl;
+                    exit(EXIT_FAILURE);
+                }
+
+                auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                termExpression->variant = methodTerm;
+                termExpression->type = newDataType;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
+
+                return termExpression;
+            }
             else if(tryPeek(TokenType::openParenthesis)) {
                 consume();
 
@@ -263,10 +313,7 @@ class Parser {
 
                 return termExpression;
             }
-            else {
-                std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Expected a term after '" << tokenToString(peek(-1).value().type) << "'"  << std::endl;
-                exit(EXIT_FAILURE);
-            }
+            else return {};
         }
 
         std::optional<ExpressionNode*> parseExpression(int minimumPrecedence = 0) {
@@ -293,6 +340,11 @@ class Parser {
             std::optional<TermExpressionNode*> term = parseTerm();
 
             if(!term.has_value()) return {};
+            if(getGroupType(term.value()->type) != GroupType::Primitive && isNegative) {
+                std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '-' cannot be applied to type '" << dataTypeToString(term.value()->type) << "'"  << std::endl;
+                exit(EXIT_FAILURE);
+            }
+
             term.value()->isNegative = isNegative;
 
             ExpressionNode* left = m_ArenaAllocator.allocate<ExpressionNode>();
@@ -401,7 +453,16 @@ class Parser {
                         left->type = DataType::Boolean;
                     }
                 }
-                else if(left->type == DataType::String && right.value()->type == DataType::String) {
+                else if(isTextType(left->type) && isTextType(right.value()->type)) {
+                    if(left->type == DataType::Character) {
+                        auto newLeft = parseCharAsString(left);
+                        left = newLeft;
+                    }
+                    if(right.value()->type == DataType::Character) {
+                        auto newRight = parseCharAsString(right.value());
+                        right = newRight;
+                    }
+
                     auto temp = m_ArenaAllocator.allocate<ExpressionNode>(); //Prevents pointer loop
 
                     temp->variant = left->variant;
@@ -420,6 +481,12 @@ class Parser {
                                _operator == TokenType::greaterThanOrEqual) {
                         left->type = DataType::Boolean;
                     }
+                    else if(_operator == TokenType::notOperator){
+                        // Unary operator, unique message
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '" << tokenToString(operationExpression->_operator) <<
+                                  "' cannot be applied to type 'string'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
                     else {
                         std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '" << tokenToString(operationExpression->_operator) <<
                                   "' cannot be applied to types 'string' and 'string'" << std::endl;
@@ -427,10 +494,19 @@ class Parser {
                     }
                 }
                 else {
-                    std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '" << tokenToString(operationExpression->_operator) <<
-                                "' cannot be applied to types '" << dataTypeToString(left->type) << "' and '"
-                                << dataTypeToString(right.value()->type) << "'" << std::endl;
-                    exit(EXIT_FAILURE);
+                    if(operationExpression->_operator == TokenType::notOperator){
+                        // Unary operator, unique message
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '" << tokenToString(operationExpression->_operator) <<
+                                  "' cannot be applied to type '" << dataTypeToString(left->type) << "'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    else {
+                        std::cerr << "Line " << peek(-1).value().lineNumber << ": Error: Operator '"
+                                  << tokenToString(operationExpression->_operator) <<
+                                  "' cannot be applied to types '" << dataTypeToString(left->type) << "' and '"
+                                  << dataTypeToString(right.value()->type) << "'" << std::endl;
+                        exit(EXIT_FAILURE);
+                    }
                 }
             }
 
@@ -710,8 +786,7 @@ class Parser {
                             statementNode->variant = reAssignmentNode;
                             statementNode->lineNumber = peek(-1).value().lineNumber;
 
-                            if((getGroupType(m_variables[reAssignmentNode->identifier.value.value()]) != GroupType::Primitive && !isPrimitive) ||
-                               getGroupType(reAssignmentNode->expression->type) != GroupType::Primitive) {
+                            if(getGroupType(m_variables[reAssignmentNode->identifier.value.value()]) == GroupType::Arrays && !isPrimitive) {
                                 std::cerr << "Line " << statementNode->lineNumber << ": Error: Cannot assign type '" << dataTypeToString(reAssignmentNode->expression->type)
                                           << "' to type '" << dataTypeToString(m_variables[reAssignmentNode->identifier.value.value()]) << "'" << std::endl;
                                 exit(EXIT_FAILURE);
@@ -857,31 +932,31 @@ class Parser {
             exit(EXIT_FAILURE);
         }
 
+        ExpressionNode* parseCharAsString(ExpressionNode* charExpression) {
+            auto methodTerm = m_ArenaAllocator.allocate<MethodTerm>();
+            methodTerm->method = {.type = TokenType::toString, .lineNumber = charExpression->lineNumber};
+            methodTerm->expression = charExpression;
+
+            auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+            termExpression->variant = methodTerm;
+            termExpression->type = DataType::String;
+            termExpression->lineNumber = charExpression->lineNumber;
+
+            auto expression = m_ArenaAllocator.allocate<ExpressionNode>();
+            expression->variant = termExpression;
+            expression->type = DataType::String;
+            expression->lineNumber = charExpression->lineNumber;
+
+            return expression;
+        }
+
         void expectedExpressionError(int lineNumber) {
             std::cerr << "Line " << lineNumber << ": Error: Expected expression after '" << tokenToString(peek(-1).value().type) << "'" << std::endl;
             exit(EXIT_FAILURE);
         }
 
-        std::string dataTypeToString(DataType dataType) {
-            switch(dataType) {
-                case DataType::Integer:
-                    return "int";
-                case DataType::Boolean:
-                    return "bool";
-                case DataType::Character:
-                    return "char";
-                case DataType::String:
-                    return "string";
-                case DataType::IntArray:
-                    return "int[]";
-                case DataType::BoolArray:
-                    return "bool[]";
-                case DataType::CharArray:
-                    return "char[]";
-                case DataType::Empty:
-                case DataType::None:
-                    return "";
-            }
+        bool isTextType(DataType dataType) {
+            return dataType == DataType::String || dataType == DataType::Character;
         }
 
         const std::vector<Token> m_Tokens;

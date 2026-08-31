@@ -4,7 +4,10 @@ set char[] b = new Array[a.size() * 2 - 1];
 set char curChar = 'a';
 set int counter = 0;
 
+set string myString = "";
+
 while counter < 5 {
+    myString = myString + curChar;
     a[counter] = curChar;
     counter = counter + 1;
     curChar = curChar + 1;
@@ -22,3 +25,5 @@ print(counter);
 
 print(a.size());
 print(b.size());
+print(stoi("-" + "100") + 5);
+print(myString + ": Length = " + toString(a.size()));
