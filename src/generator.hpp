@@ -367,22 +367,21 @@ class Generator{
                         case DataType::Integer:
                         case DataType::Boolean:
                             generator->pop("r12");
-                            generator->m_output << "    call intToString\n";
-                            generator->push("rax");
-                            generator->m_output << "    call printString\n";
-                            generator->pop("rax");
+                            generator->m_output << "    call intToString\n"
+                                                   "    mov r8, rax\n"
+                                                   "    call printString\n";
                             break;
                         case DataType::Character:
                             generator->pop("r12");
                             generator->m_output << "    mov rsi, 16\n"
                                                    "    call allocateMemory\n"
                                                    "    mov [rax], 1\n"
-                                                   "    mov [rax + 8], r12\n";
-                            generator->push("rax");
-                            generator->m_output << "    call printString\n";
-                            generator->pop("rax");
+                                                   "    mov [rax + 8], r12\n"
+                                                   "    mov r8, rax\n"
+                                                   "    call printString\n";
                             break;
                         case DataType::String:
+                            generator->pop("r8");
                             generator->m_output << "    call printString\n";
                             break;
                         default:
@@ -616,9 +615,8 @@ class Generator{
         void generateUtil() {
             m_output << "\n\n\n ; Util Functions \n\n\n";
 
-            // The address to the string must be stored at the top of the stack before calling
+            // String address must be stored in r8 before calling
             m_output << "\nprintString:\n"
-                        "    mov r8, [rsp + 8]\n"
                         "    mov rbx, [r8]\n"
                         "    mov r12, 8\n"
                         "    cmp rbx, 0\n"
