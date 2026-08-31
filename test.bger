@@ -25,5 +25,6 @@ print(counter);
 
 print(a.size());
 print(b.size());
-print(stoi("-" + "100") + 5);
-print(myString + ": Length = " + toString(a.size()));
+print(myString);
+print(myString[4]);
+print(bool(myString[1] == myString[3]));

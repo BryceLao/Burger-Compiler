@@ -69,6 +69,11 @@ enum class GroupType {
     None
 };
 
+void throwError(int lineNumber, std::string message) {
+    std::cerr << "Line " << lineNumber << ": " << message << std::endl;
+    exit(EXIT_FAILURE);
+}
+
 DataType getPrimitiveVariant(DataType dataType) {
     switch(dataType) {
         case DataType::IntArray:

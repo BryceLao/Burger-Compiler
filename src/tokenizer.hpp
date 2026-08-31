@@ -10,8 +10,6 @@ std::optional<int> getPrecedenceLevel(TokenType type) {
             return 0;
         case TokenType::andOperator:
             return 1;
-        case TokenType::notOperator:
-            return 2;
         case TokenType::equalTo:
         case TokenType::notEqualTo:
         case TokenType::lessThan:
@@ -163,10 +161,8 @@ class Tokenizer {
                     }
 
                     if(peek().has_value()) {
-                        if(!tryPeek('\"')) {
-                            std::cerr << "Line " << curLineNumber << ": Error: Expected \" but found " << peek(2).value() << std::endl;
-                            exit(EXIT_FAILURE);
-                        }
+                        if(!tryPeek('\"')) throwError(curLineNumber, "Error: Expected \" but found " +
+                            std::to_string(peek(2).value()));
                         else {
                             consume();
 
@@ -174,10 +170,7 @@ class Tokenizer {
                             buffer.clear();
                         }
                     }
-                    else {
-                        std::cerr << "Line " << curLineNumber << ": Error: Expected \" but found none" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else throwError(curLineNumber, "Error: Expected \" but found none");
                 }
                 else if(std::isdigit(c)) {
                     buffer.push_back(consume());
@@ -231,15 +224,10 @@ class Tokenizer {
                     consume();
 
                     if(peek(1).has_value()) {
-                        if(!tryPeek('\'', 1)) {
-                            std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found " << peek(1).value() << std::endl;
-                            exit(EXIT_FAILURE);
-                        }
+                        if(!tryPeek('\'', 1)) throwError(curLineNumber, "Error: Expected ' but found " +
+                            std::to_string(peek(1).value()));
                     }
-                    else {
-                        std::cerr << "Line " << curLineNumber << ": Error: Expected ' but found none" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else throwError(curLineNumber, "Error: Expected ' but found none");
 
                     tokens.push_back({.type = TokenType::charLiteral, .lineNumber = curLineNumber, .value = std::to_string(static_cast<int>(peek().value()))});
                     consume(); consume();
@@ -307,8 +295,7 @@ class Tokenizer {
                             consume();
                             break;
                         default:
-                            std::cerr << "Line " << curLineNumber << ": Error: Unexpected character '" << c << "'" << std::endl;
-                            exit(EXIT_FAILURE);
+                            throwError(curLineNumber, "Error: Unexpected character '" + std::string(1, c) + "'");
                     }
                 }
             }

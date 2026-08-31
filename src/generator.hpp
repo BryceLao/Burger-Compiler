@@ -18,46 +18,36 @@ class Generator{
                     if(expressionNodeLiteral->literal.type == TokenType::stringLiteral) {
                         int length = expressionNodeLiteral->literal.value.value().length();
 
-                        generator->m_output << "    mov rsi, " << (length + 1) * 8 << "\n"
-                                            << "    call allocateMemory\n";
+                        generator->m_output << "    mov rsi, " << (length + 1) * VAR_SIZE << "\n"
+                                               "    call allocateMemory\n";
 
                         generator->m_output << "    mov [rax], " << length << "\n";
                         for (int i = 0; i < length; ++i) {
-                            generator->m_output << "    mov [rax + " << (i + 1) * 8 << "], " << static_cast<int>(expressionNodeLiteral->literal.value.value()[i]) << "\n";
+                            generator->m_output << "    mov [rax + " << (i + 1) * VAR_SIZE << "], " << static_cast<int>(expressionNodeLiteral->literal.value.value()[i]) << "\n";
                         }
 
                         generator->push("rax");
-
-                        if (termExpression->isNegative) {
-                            std::cerr << "Line " << termExpression->lineNumber << ": Error: Unary '-' cannot be applied to type 'string'" << std::endl;
-                            exit(EXIT_FAILURE);
-                        }
                     }
                     else {
                         generator->m_output << "    mov rax, " << expressionNodeLiteral->literal.value.value() << "\n";
                         generator->push("rax");
-
-                        if (termExpression->isNegative) generator->convertToNegative();
                     }
                 }
                 void operator()(const IdentifierTerm* expressionNodeIdentifier) const {
-                    if(generator->m_variables.find(expressionNodeIdentifier->identifier.value.value()) == generator->m_variables.end()) {
-                        std::cerr << "Line " << termExpression->lineNumber << ": Error: Use of undeclared variable '" << expressionNodeIdentifier->identifier.value.value() << "'" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    if(generator->m_variables.find(expressionNodeIdentifier->identifier.value.value()) == generator->m_variables.end())
+                        throwError(termExpression->lineNumber, "Error: Use of undeclared variable '" +
+                        expressionNodeIdentifier->identifier.value.value() + "'");
 
                     int stackLocation = generator->m_variables[expressionNodeIdentifier->identifier.value.value()].stackLocation;
-                    generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation) * 8) + "]");
-
-                    if(termExpression->isNegative) generator->convertToNegative();
+                    generator->push("[rsp + " + std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE) + "]");
                 }
                 void operator()(const IndexedTerm* indexedTerm) const {
                     generator->generateExpression(indexedTerm->index);
                     generator->pop("rcx");
 
                     int stackLocation = generator->m_variables[indexedTerm->identifier.value.value()].stackLocation;
-                    generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
-                    generator->m_output << "    mov r8, [rbx]\n";
+                    generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE) << "]\n"
+                                           "    mov r8, [rbx]\n";
 
                     generator->m_output << "    cmp rcx, r8\n"
                                            "    jge outOfBounds\n"
@@ -65,42 +55,35 @@ class Generator{
                                            "    jl outOfBounds\n";
 
                     generator->m_output << "    add rcx, 1\n" // Account for header node
-                                           "    imul rcx, 8\n";
+                                           "    imul rcx, " << VAR_SIZE << "\n";
 
                     generator->m_output << "    mov rax, [rbx + rcx]\n";
                     generator->push("rax");
-
-                    if(termExpression->isNegative) generator->convertToNegative();
                 }
                 void operator()(const PropertyTerm* propertyTerm) const {
                     if(propertyTerm->property == TokenType::size || propertyTerm->property == TokenType::length) {
                         int stackLocation = generator->m_variables[propertyTerm->identifier.value.value()].stackLocation;
-                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
+                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE) << "]\n";
 
                         generator->m_output << "    mov rax, [rbx]\n";
                         generator->push("rax");
-
-                        if(termExpression->isNegative) generator->convertToNegative();
                     }
-                    else {
-                        std::cerr << "Line " << termExpression->lineNumber << ": Internal compiler error: Unknown property" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else throwError(termExpression->lineNumber, "Internal compiler error: Unknown property");
                 }
-                void operator()(const MethodTerm* methodTerm) const {
-                    if(methodTerm->method.type == TokenType::stoi) {
-                        generator->generateExpression(methodTerm->expression);
+                void operator()(const TypeCastTerm* typeCastTerm) const {
+                    if(typeCastTerm->typeCast == TokenType::stoi) {
+                        generator->generateExpression(typeCastTerm->expression);
                         generator->pop("r11");
 
                         generator->m_output << "    call stringToInt\n";
 
                         generator->push("r8");
                     }
-                    else if(methodTerm->method.type == TokenType::toString) {
-                        generator->generateExpression(methodTerm->expression);
+                    else if(typeCastTerm->typeCast == TokenType::toString) {
+                        generator->generateExpression(typeCastTerm->expression);
                         generator->pop("r12");
 
-                        switch (methodTerm->expression->type) {
+                        switch (typeCastTerm->expression->type) {
                             case DataType::Integer:
                                 generator->m_output << "    call intToString\n";
                                 break;
@@ -108,32 +91,46 @@ class Generator{
                                 generator->m_output << "    mov rsi, 16\n"
                                                        "    call allocateMemory\n"
                                                        "    mov [rax], 1\n"
-                                                       "    mov [rax + 8], r12\n";
+                                                       "    mov [rax + " << VAR_SIZE << "], r12\n";
                                 break;
                             case DataType::Character:
                                 generator->m_output << "    mov rsi, 16\n"
                                                        "    call allocateMemory\n"
                                                        "    mov [rax], 1\n"
-                                                       "    mov [rax + 8], r12\n";
+                                                       "    mov [rax + " << VAR_SIZE << "], r12\n";
                                 break;
                             default:
-                                std::cerr << "Line " << termExpression->lineNumber << ": Error: Cannot convert type '"
-                                          << dataTypeToString(methodTerm->expression->type) << "' into 'string'" << std::endl;
-                                exit(EXIT_FAILURE);
+                                throwError(termExpression->lineNumber, "Error: Cannot convert type '" +
+                                dataTypeToString(typeCastTerm->expression->type) + "' into 'string'");
                         }
 
                         generator->push("rax");
                     }
-                    else {
-
+                    else if(typeCastTerm->typeCast == TokenType::boolType){
+                        generator->generateExpression(typeCastTerm->expression);
+                        generator->pop("rax");
+                        generator->boundVariable(termExpression->type);
+                        generator->push("rax");
                     }
                 }
                 void operator()(const ParenthesisTerm* parenthesisTerm) const {
                     generator->generateExpression(parenthesisTerm->expression);
-                    if(termExpression->isNegative) generator->convertToNegative();
                 }
-                void operator()(const DummyTerm* dummyTerm) const {
-                    // DummyTerm - Not meant to be processed
+                void operator()(const UnaryOperationExpression* unaryTerm) const {
+                    generator->generateExpression(unaryTerm->expression);
+                    generator->pop("rax");
+
+                    if(unaryTerm->_operator == TokenType::subtraction) {
+                        generator->m_output << "    imul rax, -1\n";
+                    }
+                    else if(unaryTerm->_operator == TokenType::notOperator) {
+                        generator->m_output << "    cmp rax, 0\n"
+                                               "    sete al\n"
+                                               "    movzx rax, al\n";
+                    }
+                    else throwError(termExpression->lineNumber, "Internal compiler error: Unknown operator");
+
+                    generator->push("rax");
                 }
             };
 
@@ -165,7 +162,7 @@ class Generator{
 
                                 generator->m_output << "    mov rsi, r13\n"
                                                        "    add rsi, 1\n"
-                                                       "    imul rsi, 8\n"
+                                                       "    imul rsi, " << VAR_SIZE << "\n"
                                                        "    call allocateMemory\n";
 
                                 generator->m_output << "    mov [rax], r13\n";
@@ -175,7 +172,7 @@ class Generator{
 
                                 generator->m_output << "    mov r8, rax\n"
                                                        "    mov rbx, [r12]\n"
-                                                       "    imul rbx, 8\n"
+                                                       "    imul rbx, " << VAR_SIZE << "\n"
                                                        "    add rax, rbx\n"
                                                        "    mov r12, r15\n"
                                                        "    call fillMemory\n"
@@ -203,138 +200,109 @@ class Generator{
                                                        "    xor rax, 1\n";
                                 break;
                             default:
-                                std::cerr << "Line " << expression->lineNumber
-                                          << ": Internal compiler error: Unknown operator" << std::endl;
-                                exit(EXIT_FAILURE);
+                                throwError(expression->lineNumber, "Internal compiler error: Unknown operator");
                         }
                     }
                     else if(getGroupType(operatorExpressionNode->left->type) == GroupType::Primitive &&
-                            getGroupType(operatorExpressionNode->right->type) == GroupType::Primitive){
-                        //Edge-Case: Not operator only has 1 side
-                        if (operatorExpressionNode->_operator == TokenType::notOperator) {
-                            generator->generateExpression(operatorExpressionNode->right);
+                            getGroupType(operatorExpressionNode->right->type) == GroupType::Primitive) {
+                        generator->generateExpression(operatorExpressionNode->left);
+                        generator->generateExpression(operatorExpressionNode->right);
 
-                            generator->pop("rax");
+                        generator->pop("rbx");
+                        generator->pop("rax");
 
-                            generator->m_output << "    cmp rax,0\n";
-                            generator->m_output << "    sete al\n";
-                            generator->m_output << "    movzx rax, al\n";
+                        switch (operatorExpressionNode->_operator) {
+                            case (TokenType::addition):
+                                generator->m_output << "    add rax, rbx\n";
+                                break;
+                            case (TokenType::subtraction):
+                                generator->m_output << "    sub rax, rbx\n";
+                                break;
+                            case (TokenType::multiplication):
+                                generator->m_output << "    cqo\n"
+                                                       "    imul rax, rbx\n";
+                                break;
+                            case (TokenType::division):
+                                generator->m_output << "    cqo\n"
+                                                       "    idiv rbx\n";
+                                break;
+                            case (TokenType::modulo):
+                                generator->m_output << "    cqo\n"
+                                                       "    idiv rbx\n"
+                                                       "    mov rax, rdx\n";
+                                break;
+                            case (TokenType::equalTo):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    sete al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::notEqualTo):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    setne al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::lessThan):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    setl al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::lessThanOrEqual):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    setle al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::greaterThan):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    setg al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::greaterThanOrEqual):
+                                generator->m_output << "    cmp rax, rbx\n"
+                                                       "    setge al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            case (TokenType::andOperator):
+                                //Converts Non-Zero Integers as True booleans
+                                generator->m_output << "    cmp rax, 0\n"
+                                                       "    setne al\n"
+                                                       "    movzx rax, al\n";
+
+                                generator->m_output << "    cmp rbx, 0\n"
+                                                       "    setne bl\n"
+                                                       "    movzx rbx, bl\n";
+
+                                generator->m_output << "    add rax, rbx\n";
+
+                                generator->m_output << "    cmp rax, 2\n"
+                                                       "    setge al\n"
+                                                       "    movzx rax, al\n";
+
+                                break;
+                            case (TokenType::orOperator):
+                                //Converts Non-Zero Integers as True booleans
+                                generator->m_output << "    cmp rax, 0\n"
+                                                       "    setne al\n"
+                                                       "    movzx rax, al\n";
+
+                                generator->m_output << "    cmp rbx, 0\n"
+                                                       "    setne bl\n"
+                                                       "    movzx rbx, bl\n";
+
+                                generator->m_output << "    add rax, rbx\n";
+
+                                generator->m_output << "    cmp rax, 1\n"
+                                                       "    setge al\n"
+                                                       "    movzx rax, al\n";
+                                break;
+                            default:
+                                throwError(expression->lineNumber, "Internal compiler error: Unknown operator");
                         }
-                        else {
-                            generator->generateExpression(operatorExpressionNode->left);
-                            generator->generateExpression(operatorExpressionNode->right);
 
-                            generator->pop("rbx");
-                            generator->pop("rax");
-
-                            switch (operatorExpressionNode->_operator) {
-                                case (TokenType::addition):
-                                    generator->m_output << "    add rax,rbx\n";
-                                    break;
-                                case (TokenType::subtraction):
-                                    generator->m_output << "    sub rax,rbx\n";
-                                    break;
-                                case (TokenType::multiplication):
-                                    generator->m_output << "    cqo\n";
-                                    generator->m_output << "    imul rax,rbx\n";
-                                    break;
-                                case (TokenType::division):
-                                    generator->m_output << "    cqo\n";
-                                    generator->m_output << "    idiv rbx\n";
-                                    break;
-                                case (TokenType::modulo):
-                                    generator->m_output << "    cqo\n";
-                                    generator->m_output << "    idiv rbx\n";
-                                    generator->m_output << "    mov rax, rdx\n";
-                                    break;
-                                case (TokenType::equalTo):
-                                    generator->m_output << "    cmp rax, rbx\n";
-                                    generator->m_output << "    sete al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::notEqualTo):
-                                    generator->m_output << "    cmp rax, rbx\n";
-                                    generator->m_output << "    setne al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::lessThan):
-                                    generator->m_output << "    cmp rax, rbx\n";
-
-                                    //Converts into 1 or 0
-                                    generator->m_output << "    setl al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::lessThanOrEqual):
-                                    generator->m_output << "    cmp rax, rbx\n";
-
-                                    //Converts into 1 or 0
-                                    generator->m_output << "    setle al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::greaterThan):
-                                    generator->m_output << "    cmp rax, rbx\n";
-
-                                    //Converts into 1 or 0
-                                    generator->m_output << "    setg al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::greaterThanOrEqual):
-                                    generator->m_output << "    cmp rax, rbx\n";
-
-                                    //Converts into 1 or 0
-                                    generator->m_output << "    setge al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                case (TokenType::andOperator):
-                                    //Converts Non-Zero Integers as True booleans
-                                    generator->m_output << "    cmp rax, 0\n";
-                                    generator->m_output << "    setne al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-
-                                    generator->m_output << "    cmp rbx, 0\n";
-                                    generator->m_output << "    setne bl\n";
-                                    generator->m_output << "    movzx rbx, bl\n";
-
-                                    generator->m_output << "    add rax, rbx\n";
-
-                                    generator->m_output << "    cmp rax, 2\n";
-                                    generator->m_output << "    setge al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-
-                                    break;
-                                case (TokenType::orOperator):
-                                    //Converts Non-Zero Integers as True booleans
-                                    generator->m_output << "    cmp rax, 0\n";
-                                    generator->m_output << "    setne al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-
-                                    generator->m_output << "    cmp rbx, 0\n";
-                                    generator->m_output << "    setne bl\n";
-                                    generator->m_output << "    movzx rbx, bl\n";
-
-                                    generator->m_output << "    add rax, rbx\n";
-
-                                    generator->m_output << "    cmp rax, 1\n";
-                                    generator->m_output << "    setge al\n";
-                                    generator->m_output << "    movzx rax, al\n";
-                                    break;
-                                default:
-                                    std::cerr << "Line " << expression->lineNumber
-                                              << ": Internal compiler error: Unknown operator" << std::endl;
-                                    exit(EXIT_FAILURE);
-                            }
-
-                            generator->boundVariable(expression->type);
-                        }
+                        generator->boundVariable(expression->type);
                     }
-                    else {
-                        std::cerr << "Line " << expression->lineNumber
-                                  << ": Internal compiler error: Cannot resolve expression" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else throwError(expression->lineNumber, "Internal compiler error: Cannot resolve expression");
 
                     generator->push("rax");
-
                 }
             };
 
@@ -351,10 +319,7 @@ class Generator{
                     generator->generateExpression(exitNode->expression);
 
                     // Exit Code can only be an integer
-                    if(exitNode->expression->type != DataType::Integer) {
-                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Exit code must be an integer" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    if(exitNode->expression->type != DataType::Integer) throwError(statementNode->lineNumber, "Error: Exit code must be an integer");
 
                     generator->m_output << "    mov rax, 60\n";
                     generator->pop("rdi");
@@ -376,7 +341,7 @@ class Generator{
                             generator->m_output << "    mov rsi, 16\n"
                                                    "    call allocateMemory\n"
                                                    "    mov [rax], 1\n"
-                                                   "    mov [rax + 8], r12\n"
+                                                   "    mov [rax + " << VAR_SIZE << "], r12\n"
                                                    "    mov r8, rax\n"
                                                    "    call printString\n";
                             break;
@@ -385,16 +350,13 @@ class Generator{
                             generator->m_output << "    call printString\n";
                             break;
                         default:
-                            std::cerr << "Line " << statementNode->lineNumber << ": Internal compiler error: Unknown data type"  << std::endl;
-                            exit(EXIT_FAILURE);
+                            throwError(statementNode->lineNumber, "Internal compiler error: Unknown data type");
                     }
                 }
                 void operator()(const DeclarationNode* declarationNode) const {
-                    if (generator->m_variables.contains(declarationNode->identifier.value.value())) {
-                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Redefinition of variable '"
-                                  << declarationNode->identifier.value.value() << "'" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    if (generator->m_variables.contains(declarationNode->identifier.value.value()))
+                        throwError(statementNode->lineNumber, "Error: Redefinition of variable '" +
+                        declarationNode->identifier.value.value() + "'");
 
                     if(getGroupType(declarationNode->type) == GroupType::Primitive) {
                         generator->generateExpression(declarationNode->expression);
@@ -415,7 +377,7 @@ class Generator{
 
                         generator->m_output << "    mov rsi, [r12]\n"
                                                "    add rsi, 1\n"
-                                               "    imul rsi, 8\n"
+                                               "    imul rsi, " << VAR_SIZE << "\n"
                                                "    call allocateMemory\n";
 
                         generator->m_output << "    mov rdx, [r12]\n"
@@ -436,8 +398,8 @@ class Generator{
 
                         generator->m_output << "    mov r12, rsi\n"; // Store size
 
-                        generator->m_output << "    add rsi, 1\n"; // Account for header node (size)
-                        generator->m_output << "    imul rsi, 8\n";
+                        generator->m_output << "    add rsi, 1\n"
+                                               "    imul rsi, " << VAR_SIZE << "\n";
 
                         generator->m_output << "    call allocateMemory\n";
 
@@ -448,21 +410,16 @@ class Generator{
                                 .stackLocation = generator->m_stackSize,
                                 .type = getPrimitiveVariant(declarationNode->type)}});
                     }
-                    else {
-                        std::cerr << "Line " << statementNode->lineNumber << ": Internal compiler error: Unknown data type" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    else throwError(statementNode->lineNumber, "Internal compiler error: Unknown data type");
                 }
                 void operator()(const ReAssignmentNode* reAssignmentNode) const {
-                    if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value())) {
-                        std::cerr << "Line " << statementNode->lineNumber << ": Error: Use of undeclared variable '" << reAssignmentNode->identifier.value.value() << "'" << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
+                    if(!generator->m_variables.contains(reAssignmentNode->identifier.value.value()))
+                        throwError(statementNode->lineNumber, "Error: Use of undeclared variable '" + reAssignmentNode->identifier.value.value() + "'");
 
                     if(reAssignmentNode->index.has_value()) {
                         int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
                         generator->m_output << "    mov rbx, [rsp + "
-                                            << std::to_string((generator->m_stackSize - stackLocation) * 8)
+                                            << std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE)
                                             << "]\n";
                         generator->m_output << "    mov r8, [rbx]\n";
 
@@ -479,10 +436,10 @@ class Generator{
                                                "    jl outOfBounds\n";
 
                         generator->m_output << "    add r10, 1\n" // Account for header node
-                                               "    imul r10, 8\n";
+                                               "    imul r10, " << VAR_SIZE << "\n";
 
-                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * 8) << "]\n";
-                        generator->m_output << "    mov [rbx + r10], rax\n";
+                        generator->m_output << "    mov rbx, [rsp + " << std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE) << "]\n"
+                                               "    mov [rbx + r10], rax\n";
                     }
                     else {
                         generator->generateExpression(reAssignmentNode->expression);
@@ -492,7 +449,7 @@ class Generator{
 
                         int stackLocation = generator->m_variables[reAssignmentNode->identifier.value.value()].stackLocation;
                         generator->m_output << "    mov [rsp + "
-                                            << std::to_string((generator->m_stackSize - stackLocation) * 8)
+                                            << std::to_string((generator->m_stackSize - stackLocation) * VAR_SIZE)
                                             << "], rax\n";
                     }
                 }
@@ -512,8 +469,8 @@ class Generator{
 
                             generator->generateExpression(conditionalNode->condition[i]);
                             generator->pop("rax");
-                            generator->m_output << "    cmp rax, 0\n";
-                            generator->m_output << "    je a" << curLabel << "\n";
+                            generator->m_output << "    cmp rax, 0\n"
+                                                   "    je a" << curLabel << "\n";
 
                             generator->generateScope(conditionalNode->statements[i]);
 
@@ -541,8 +498,8 @@ class Generator{
                     generator->pop("rax");
 
                     //If condition is true jump back to statement label
-                    generator->m_output << "    cmp rax, 0\n";
-                    generator->m_output << "    jne a" << statementLabel << "\n";
+                    generator->m_output << "    cmp rax, 0\n"
+                                           "    jne a" << statementLabel << "\n";
                 }
             };
 
@@ -565,20 +522,20 @@ class Generator{
                         "    mov rdx, 32\n"
                         "    syscall\n";
 
-            m_output << "    mov rax, 60\n";
-            m_output << "    mov rdi, 0\n";
-            m_output << "    syscall\n";
+            m_output << "    mov rax, 60\n"
+                        "    mov rdi, 0\n"
+                        "    syscall\n";
 
-            m_output << "outOfBounds:\n";
-            m_output << "    mov rax, 1\n"
+            m_output << "outOfBounds:\n"
+                        "    mov rax, 1\n"
                         "    mov rdi, 1\n"
                         "    mov rsi, oobMsg\n"
                         "    mov rdx, 33\n"
                         "    syscall\n"
                         "    jmp errorExit\n";
 
-            m_output << "invalidArraySize:\n";
-            m_output << "    mov rax, 1\n"
+            m_output << "invalidArraySize:\n"
+                        "    mov rax, 1\n"
                         "    mov rdi, 1\n"
                         "    mov rsi, negSizeArray\n"
                         "    mov rdx, 44\n"
@@ -592,9 +549,9 @@ class Generator{
                         "    mov rdx, 32\n"
                         "    syscall\n";
 
-            m_output << "    mov rax, 60\n";
-            m_output << "    mov rdi, 1\n";
-            m_output << "    syscall\n";
+            m_output << "    mov rax, 60\n"
+                        "    mov rdi, 1\n"
+                        "    syscall\n";
 
 
             generateUtil();
@@ -615,10 +572,12 @@ class Generator{
         void generateUtil() {
             m_output << "\n\n\n ; Util Functions \n\n\n";
 
-            // String address must be stored in r8 before calling
+            // r8 = String Address
+            // Overwrites: rax, rbx, rdx, rdi, rsi, r12
+            // Returns: Nothing
             m_output << "\nprintString:\n"
                         "    mov rbx, [r8]\n"
-                        "    mov r12, 8\n"
+                        "    mov r12, " << VAR_SIZE << "\n"
                         "    cmp rbx, 0\n"
                         "    jle donePrinting\n"
                         "    printStringLoop:\n"
@@ -628,7 +587,7 @@ class Generator{
                         "        mov rdx, 1\n"
                         "        syscall\n"
                         "        sub rbx, 1\n"
-                        "        add r12, 8\n"
+                        "        add r12, " << VAR_SIZE << "\n"
                         "        cmp rbx, 0\n"
                         "        jg printStringLoop\n"
                         "    donePrinting:\n"
@@ -639,28 +598,18 @@ class Generator{
                         "        syscall\n"
                         "        ret\n";
 
-            // Boolean must be stored in rax before calling
-            // Returns the boolean in rax
+            // rax = Boolean Value
+            // Overwrites: None
+            // Returns: rax = Bounded Boolean Value
             m_output << "\nboundBool:\n"
                         "    cmp rax, 0\n"
                         "    setne al\n"
                         "    movzx rax, al\n"
                         "    ret\n";
 
-            // Char must be stored in rax before calling
-            // Returns the char in rax
-            m_output << "\nboundChar:\n"
-                        "    mov rbx, 128\n"
-                        "    cqo\n"
-                        "    idiv rbx\n"
-                        "    test rdx, rdx\n"
-                        "    jns doneDividing\n"
-                        "    add rdx, 128\n"
-                        "    doneDividing:\n"
-                        "        mov rax, rdx\n"
-                        "    ret\n";
-
-            // Allocation size must be stored in rsi before calling (in bytes)
+            // rsi = Memory Size (bytes)
+            // Overwrites: rax, rdx, rdi, r8, r9, r10
+            // Returns: rax = Memory Address
             m_output << "\nallocateMemory:\n"
                         "    mov rdi, 0\n"
                         "    mov rdx, 0x3\n"
@@ -671,10 +620,12 @@ class Generator{
                         "    syscall\n"
                         "    ret\n";
 
-            // Old address must be stored in r12, and new address in rax before calling
+            // r12 = Old Address, rax = New Address
+            // Overwrites: rbx, rcx, rdx
+            // Returns: Nothing
             m_output << "\nfillMemory:\n"
                         "    mov rbx, [r12]\n"
-                        "    mov rcx, 8\n"
+                        "    mov rcx, " << VAR_SIZE << "\n"
                         "\n"
                         "    fillLoop:\n"
                         "        cmp rbx, 0\n"
@@ -682,20 +633,21 @@ class Generator{
                         "        mov rdx, [r12 + rcx]\n"
                         "        mov [rax + rcx], rdx\n"
                         "        sub rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp fillLoop\n"
                         "    doneFilling:\n"
                         "        ret\n";
 
-            // Left string address must be stored in r14, and right string address in r15 before calling
-            // Returns the boolean in rax
+            // r14 = Left String Address, r15 = Right String Address
+            // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
+            // Returns: rax = Boolean Result
             m_output << "\ncmpStringEq:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
                         "    cmp r8, r9\n"
                         "    jne isNotEqual\n"
                         "    mov rbx, r8\n"
-                        "    mov rcx, 8\n"
+                        "    mov rcx, " << VAR_SIZE << "\n"
                         "    cmpEqLoop:\n"
                         "        cmp rbx, 0\n"
                         "        jle isEqual\n"
@@ -704,7 +656,7 @@ class Generator{
                         "        cmp r12, r13\n"
                         "        jne isNotEqual\n"
                         "        sub rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp cmpEqLoop\n"
                         "    isEqual:\n"
                         "        mov rax, 1\n"
@@ -713,13 +665,14 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
-            // Left string address must be stored in r14, and right string address in r15 before calling
-            // Returns the boolean in rax
+            // r14 = Left String Address, r15 = Right String Address
+            // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
+            // Returns: rax = Boolean Result
             m_output << "\ncmpStringGt:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
                         "    mov rbx, 0\n"
-                        "    mov rcx, 8\n"
+                        "    mov rcx, " << VAR_SIZE << "\n"
                         "    cmpGtLoop:"
                         "        cmp rbx, r8\n"
                         "        jge lessEqual\n"
@@ -731,7 +684,7 @@ class Generator{
                         "        jg greater\n"
                         "        jl lessEqual\n"
                         "        add rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp cmpGtLoop\n"
                         "    greater:\n"
                         "        mov rax, 1\n"
@@ -740,13 +693,14 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
-            // Left string address must be stored in r14, and right string address in r15 before calling
-            // Returns the boolean in rax
+            // r14 = Left String Address, r15 = Right String Address
+            // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
+            // Returns: rax = Boolean Result
             m_output << "\ncmpStringLt:\n"
                         "    mov r8, [r14]\n"
                         "    mov r9, [r15]\n"
                         "    mov rbx, 0\n"
-                        "    mov rcx, 8\n"
+                        "    mov rcx, " << VAR_SIZE << "\n"
                         "    cmpLtLoop:"
                         "        cmp rbx, r9\n"
                         "        jge greaterEqual\n"
@@ -758,7 +712,7 @@ class Generator{
                         "        jl less\n"
                         "        jg greaterEqual\n"
                         "        add rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp cmpLtLoop\n"
                         "    less:\n"
                         "        mov rax, 1\n"
@@ -767,19 +721,20 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
-            // String address must be stored in r11 before calling
-            // Returns the integer in r8
+            // r11 = String Address
+            // Overwrites: rax, rbx, rcx, rdx, r8, r10, r12, r13, r14
+            // Returns: r8 = Integer Value
             m_output << "\nstringToInt:\n"
                         "    mov r12, [r11]\n"
-                        "    mov r13, 8\n"
+                        "    mov r13, " << VAR_SIZE << "\n"
                         "    mov r14, 10\n"
                         "    cmp r12, 0\n"
                         "    je stoiEmptyString\n"
-                        "    mov rdx, [r11 + 8]\n"
-                        "    cmp rdx, 45\n"
+                        "    mov rdx, [r11 + " << VAR_SIZE << "]\n"
+                        "    cmp rdx, " << ASCII_MINUS << "\n"
                         "    jne stoiIsPositive\n"
                         "    sub r12, 1\n"
-                        "    add r13, 8\n"
+                        "    add r13, " << VAR_SIZE << "\n"
                         "    stoiIsPositive:\n"
                         "    mov r8, 0\n"
                         "    mov rax, 1\n"
@@ -789,12 +744,12 @@ class Generator{
                         "        cmp rbx, 0\n"
                         "        jle stoiDoneChecking\n"
                         "        mov rdx, [r11 + rcx]\n"
-                        "        cmp rdx, 48\n"
+                        "        cmp rdx, " << ASCII_ZERO << "\n"
                         "        jl stoiInvalidString\n"
-                        "        cmp rdx, 57\n"
+                        "        cmp rdx, " << ASCII_NINE << "\n"
                         "        jg stoiInvalidString\n"
                         "        sub rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        imul rax, 10\n"
                         "        jmp stoiCheckLoop\n"
                         "    stoiDoneChecking:\n"
@@ -806,13 +761,13 @@ class Generator{
                         "        cmp rbx, 0\n"
                         "        jle stoiDoneConverting\n"
                         "        mov r10, [r11 + rcx]\n"
-                        "        sub r10, 48\n"
+                        "        sub r10, " << ASCII_ZERO << "\n"
                         "        imul r10, rax\n"
                         "        add r8, r10\n"
                         "        cqo\n"
                         "        idiv r14\n"
                         "        sub rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp stoiConvertLoop\n"
                         "    stoiDoneConverting:\n"
                         "    cmp r13, 16\n"
@@ -838,8 +793,9 @@ class Generator{
                         "        mov rdi, 1\n"
                         "        syscall\n";
 
-            // Integer value must be stored in r12 before calling
-            // Returns the string address in rax
+            // r12 = Integer Value
+            // Overwrites: rax, rbx, rcx, rdx, rsi, r14
+            // Returns: rax = String Address
             m_output << "\nintToString:\n"
                         "    mov rax, r12\n"
                         "    mov rbx, 0\n"
@@ -847,7 +803,7 @@ class Generator{
                         "    mov r15, 0\n"
                         "    cmp rax, 0\n"
                         "    jne intToStringNotZero\n"
-                        "    mov rdx, 48\n"
+                        "    mov rdx, " << ASCII_ZERO << "\n"
                         "    push rdx\n"
                         "    mov rbx, 1\n"
                         "    jmp intToStringDoneConverting\n"
@@ -862,22 +818,22 @@ class Generator{
                         "        jle intToStringDoneConverting\n"
                         "        cqo\n"
                         "        idiv rcx\n"
-                        "        add rdx, 48\n"
+                        "        add rdx, " << ASCII_ZERO << "\n"
                         "        push rdx\n"
                         "        add rbx, 1\n"
                         "        jmp intToStringConvertLoop\n"
                         "    intToStringDoneConverting:\n"
                         "        cmp r15, 0\n"
                         "        je intToStringDontAddNegative\n"
-                        "        mov rdx, 45\n"
+                        "        mov rdx, " << ASCII_MINUS << "\n"
                         "        push rdx\n"
                         "        add rbx, 1\n"
                         "        intToStringDontAddNegative:\n"
                         "        mov rsi, rbx\n"
                         "        add rsi, 1\n"
-                        "        imul rsi, 8\n"
+                        "        imul rsi, " << VAR_SIZE << "\n"
                         "        call allocateMemory\n"
-                        "        mov rcx, 8\n"
+                        "        mov rcx, " << VAR_SIZE << "\n"
                         "        mov [rax], rbx\n"
                         "    intToStringFillString:\n"
                         "        cmp rbx, 0\n"
@@ -885,7 +841,7 @@ class Generator{
                         "        pop rdx\n"
                         "        mov [rax + rcx], rdx\n"
                         "        sub rbx, 1\n"
-                        "        add rcx, 8\n"
+                        "        add rcx, " << VAR_SIZE << "\n"
                         "        jmp intToStringFillString\n"
                         "    intToStringDoneFilling:\n"
                         "        ret\n";
@@ -923,24 +879,9 @@ class Generator{
         }
 
         void boundVariable(DataType type) {
-            switch(type) {
-                case DataType::Integer:
-                    break;
-                case DataType::Boolean:
-                    m_output << "    call boundBool\n";
-                    break;
-                case DataType::Character:
-                    m_output << "    call boundChar\n";
-                    break;
-                default:
-                    break;
+            if(type == DataType::Boolean) {
+                m_output << "    call boundBool\n";
             }
-        }
-
-        void convertToNegative() {
-            m_output << "    pop rax\n";
-            m_output << "    imul rax, -1\n";
-            m_output << "    push rax\n";
         }
 
         struct Variable{
@@ -955,4 +896,9 @@ class Generator{
         int m_scopeDepth = 0;
         int m_curLabelCount = 0;
         std::unordered_map<std::string, Variable> m_variables;
+
+        static constexpr int VAR_SIZE = 8;
+        static constexpr int ASCII_ZERO = 48;
+        static constexpr int ASCII_NINE = 57;
+        static constexpr int ASCII_MINUS = 45;
 };
