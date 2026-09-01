@@ -615,6 +615,7 @@ class Generator{
                         "    mov rdi, 1\n"
                         "    syscall\n";
 
+            // Prints the contents of a string
             // r8 = String Address
             // Overwrites: rax, rbx, rdx, rdi, rsi, r12
             // Returns: Nothing
@@ -636,6 +637,7 @@ class Generator{
                         "    donePrinting:\n"
                         "        ret\n";
 
+            // Prints the new line character
             // Overwrites: rax, rdx, rdi, rsi
             // Returns: Nothing
             m_output << "\nprintNewLine:\n"
@@ -646,6 +648,7 @@ class Generator{
                         "    syscall\n"
                         "    ret\n";
 
+            // Fixes boolean term to between 0 and 1
             // rax = Boolean Value
             // Overwrites: None
             // Returns: rax = Bounded Boolean Value
@@ -655,6 +658,7 @@ class Generator{
                         "    movzx rax, al\n"
                         "    ret\n";
 
+            // Allocates memory using mmap. Used for any non-primitive data type
             // rsi = Memory Size (bytes)
             // Overwrites: rax, rdx, rdi, r8, r9, r10
             // Returns: rax = Memory Address
@@ -668,6 +672,7 @@ class Generator{
                         "    syscall\n"
                         "    ret\n";
 
+            // Fill a term with the contents of another. Only works for non-primitive data types
             // r12 = Old Address, rax = New Address
             // Overwrites: rbx, rcx, rdx
             // Returns: Nothing
@@ -686,6 +691,7 @@ class Generator{
                         "    doneFilling:\n"
                         "        ret\n";
 
+            // Compares the equality of 2 strings
             // r14 = Left String Address, r15 = Right String Address
             // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
             // Returns: rax = Boolean Result
@@ -713,6 +719,7 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
+            // Compares if the left string is greater than the right
             // r14 = Left String Address, r15 = Right String Address
             // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
             // Returns: rax = Boolean Result
@@ -741,6 +748,7 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
+            // Compares if the left string is less than the right
             // r14 = Left String Address, r15 = Right String Address
             // Overwrites: rax, rbx, rcx, r8, r9, r12, r13
             // Returns: rax = Boolean Result
@@ -769,6 +777,7 @@ class Generator{
                         "        mov rax, 0\n"
                         "        ret\n";
 
+            // Converts a string to an integer. This can then be used to convert strings to any of the other primitive data types
             // r11 = String Address
             // Overwrites: rax, rbx, rcx, rdx, r8, r10, r12, r13, r14
             // Returns: r8 = Integer Value
@@ -834,8 +843,9 @@ class Generator{
                         "        syscall\n"
                         "        call exitError\n";
 
+            // Converts an integer to a string. This can then be used to convert other primitive data types into strings
             // r12 = Integer Value
-            // Overwrites: rax, rbx, rcx, rdx, rsi, r14
+            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r15
             // Returns: rax = String Address
             m_output << "\nintToString:\n"
                         "    mov rax, r12\n"
@@ -887,8 +897,9 @@ class Generator{
                         "    intToStringDoneFilling:\n"
                         "        ret\n";
 
-            // Overwrites: rax
-            // Returns: rax = String Address
+            // Reads the next character entered
+            // Overwrites: rax, rdx, rdi, rsi, unReadFlag, readBuffer
+            // Returns: rax = Character Value
             m_output << "\nreadRawChar:\n"
                         "    cmp [unReadFlag], 1\n"
                         "    jne readRaw\n"
@@ -913,8 +924,22 @@ class Generator{
                         "        syscall\n"
                         "        call exitError\n";
 
+            // Reads the first non-whitespace character entered
+            // Overwrites: rax, rbx, rdx, rdi, rsi, unReadFlag, readBuffer
+            // Returns: rax = Character Value
+            m_output << "\nreadChar:\n"
+                        "    readCharLoop:\n"
+                        "        call readRawChar\n"
+                        "        call isWhiteSpace\n"
+                        "        cmp rbx, 1\n"
+                        "        je readCharLoop\n"
+                        "    ret\n";
+
+            // Reads the integer value entered
+            // Overwrites: rax, rbx, rdx, rdi, rsi, r15, r14, rbx, r9, r10, unReadFlag, readBuffer
+            // Returns: rax = Integer Value
             m_output << "\nreadInt:\n"
-                        "    call readRawChar\n"
+                        "    call readChar\n"
                         "    call unReadChar\n"
                         "    mov r15, 0\n"
                         "    mov r14, 0\n"
@@ -959,18 +984,8 @@ class Generator{
                         "    returnIntInput:\n"
                         "        ret\n";
 
-
-            // Overwrites: rax, rbx, rdx, rdi, rsi, readBuffer
-            // Returns: rax = Character Value
-            m_output << "\nreadChar:\n"
-                        "    readCharLoop:\n"
-                        "        call readRawChar\n"
-                        "        call isWhiteSpace\n"
-                        "        cmp rbx, 1\n"
-                        "        je readCharLoop\n"
-                        "    ret\n";
-
-            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12
+            // Reads characters until a whitespace character is met. Ignores leading whitespace characters
+            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12, unReadFlag, readBuffer
             // Returns: rax = String Address
             m_output << "\nreadNext:\n"
                         "    call readChar\n"
@@ -1002,7 +1017,8 @@ class Generator{
                         "        doneProcessingWord:\n"
                         "            ret\n";
 
-            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12
+            // Reads characters until a new line character (\n) is met. Ignores leading new line characters
+            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12, unReadFlag, readBuffer
             // Returns: rax = String Address
             m_output << "\nreadLine:\n"
                         "    removeStartingNewLines:\n"
@@ -1036,10 +1052,12 @@ class Generator{
                         "        doneProcessingLine:\n"
                         "            ret\n";
 
+            // Sets the unReadFlag to true, so the next call for readRawChar returns the previously read character
             m_output << "\nunReadChar:\n"
                         "    mov [unReadFlag], 1\n"
                         "    ret\n";
 
+            // Checks if rax contains the ascii value of a whitespace character
             // rax = Character Value
             // Overwrites: rbx
             // Returns: rbx = Boolean Result
