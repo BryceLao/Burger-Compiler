@@ -9,6 +9,7 @@ class Generator{
         inline explicit Generator(ProgramNode program) :
             m_program(std::move(program)) {}
 
+        // Generates term and pushes onto the stack
         void generateTerm(const TermExpressionNode* termExpression) {
             struct TermVisitor {
                 Generator* generator;
@@ -113,6 +114,36 @@ class Generator{
                         generator->push("rax");
                     }
                 }
+                void operator()(const InputTerm* inputTerm) const {
+                    if(inputTerm->inputMessage.has_value()) {
+                        generator->generateExpression(inputTerm->inputMessage.value());
+                        generator->pop("r8");
+                        generator->m_output << "    call printString\n";
+                    }
+
+                    switch(inputTerm->readType) {
+                        case TokenType::readInt:
+                            generator->m_output << "    call readInt\n";
+                            break;
+                        case TokenType::readBool:
+                            generator->m_output << "    call readInt\n";
+                            generator->boundVariable(DataType::Boolean);
+                            break;
+                        case TokenType::readChar:
+                            generator->m_output << "    call readChar\n";
+                            break;
+                        case TokenType::readNext:
+                            generator->m_output << "    call readNext\n";
+                            break;
+                        case TokenType::readLine:
+                            generator->m_output << "    call readLine\n";
+                            break;
+                        default:
+                            throwError(termExpression->lineNumber, "Internal compiler error: Unknown method");
+                    }
+
+                    generator->push("rax");
+                }
                 void operator()(const ParenthesisTerm* parenthesisTerm) const {
                     generator->generateExpression(parenthesisTerm->expression);
                 }
@@ -138,6 +169,7 @@ class Generator{
             std::visit(visitor, termExpression->variant);
         }
 
+        // Generates expression and pushes onto the stack
         void generateExpression(const ExpressionNode* expression) {
             struct ExpressionVisitor {
                 Generator* generator;
@@ -352,6 +384,8 @@ class Generator{
                         default:
                             throwError(statementNode->lineNumber, "Internal compiler error: Unknown data type");
                     }
+
+                    generator->m_output << "    call printNewLine\n";
                 }
                 void operator()(const DeclarationNode* declarationNode) const {
                     if (generator->m_variables.contains(declarationNode->identifier.value.value()))
@@ -508,9 +542,14 @@ class Generator{
         }
 
         [[nodiscard]] std::string generateProgram() {
+            m_output << "DEFAULT REL\n";
+
             generateData();
 
-            m_output << "section .text\nglobal _start\n_start:\n";
+            m_output << "section .text\n"
+                        "global _start\n"
+                        "_start:\n"
+                        "    mov [unReadFlag], 0\n";
 
             for(const StatementNode* statement : m_program.statements) {
                 generateStatement(statement);
@@ -532,7 +571,7 @@ class Generator{
                         "    mov rsi, oobMsg\n"
                         "    mov rdx, 33\n"
                         "    syscall\n"
-                        "    jmp errorExit\n";
+                        "    call exitError\n";
 
             m_output << "invalidArraySize:\n"
                         "    mov rax, 1\n"
@@ -540,18 +579,7 @@ class Generator{
                         "    mov rsi, negSizeArray\n"
                         "    mov rdx, 44\n"
                         "    syscall\n"
-                        "    jmp errorExit\n";
-
-            m_output << "errorExit:\n"
-                        "    mov rax, 1\n"
-                        "    mov rdi, 1\n"
-                        "    mov rsi, exitMsg\n"
-                        "    mov rdx, 32\n"
-                        "    syscall\n";
-
-            m_output << "    mov rax, 60\n"
-                        "    mov rdi, 1\n"
-                        "    syscall\n";
+                        "    call exitError\n";
 
 
             generateUtil();
@@ -560,17 +588,32 @@ class Generator{
         }
 
         void generateData() {
-            m_output << "section .data\n"
+            m_output << "section .bss\n"
+                        "    readBuffer resb 1\n"
+                        "    unReadFlag resb 1\n";
+
+            m_output << "\nsection .data\n"
                         "    exitMsg db \"Process finished with exit code \"\n"
-                        "    oobMsg db \"Error: Array index out of bounds\", 10\n"
-                        "    negSizeArray db \"Error: Array size must be greater than zero\", 10\n"
-                        "    invalidStoiArg db \"Error: Invalid integer string: string must contain only digits (0-9), with an optional leading '-'\", 10\n"
+                        "    oobMsg db \"Error: Array index out of bounds\", " << ASCII_NEWLINE << "\n"
+                        "    negSizeArray db \"Error: Array size must be greater than zero\", " << ASCII_NEWLINE << "\n"
+                        "    invalidStoiArg db \"Error: Invalid integer string: string must contain only digits (0-9), with an optional leading '-'\", " << ASCII_NEWLINE << "\n"
+                        "    endOfFileMsg db \"Error: Unexpected end of input while reading\", " << ASCII_NEWLINE << "\n"
                         "    newLine db 10\n"
                         "\n";
         }
 
         void generateUtil() {
             m_output << "\n\n\n ; Util Functions \n\n\n";
+
+            m_output << "\nexitError:\n"
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, exitMsg\n"
+                        "    mov rdx, 32\n"
+                        "    syscall\n"
+                        "    mov rax, 60\n"
+                        "    mov rdi, 1\n"
+                        "    syscall\n";
 
             // r8 = String Address
             // Overwrites: rax, rbx, rdx, rdi, rsi, r12
@@ -591,12 +634,17 @@ class Generator{
                         "        cmp rbx, 0\n"
                         "        jg printStringLoop\n"
                         "    donePrinting:\n"
-                        "        mov rax, 1\n"
-                        "        mov rdi, 1\n"
-                        "        mov rsi, newLine\n"
-                        "        mov rdx, 1\n"
-                        "        syscall\n"
                         "        ret\n";
+
+            // Overwrites: rax, rdx, rdi, rsi
+            // Returns: Nothing
+            m_output << "\nprintNewLine:\n"
+                        "    mov rax, 1\n"
+                        "    mov rdi, 1\n"
+                        "    mov rsi, newLine\n"
+                        "    mov rdx, 1\n"
+                        "    syscall\n"
+                        "    ret\n";
 
             // rax = Boolean Value
             // Overwrites: None
@@ -784,14 +832,7 @@ class Generator{
                         "        mov rsi, invalidStoiArg\n"
                         "        mov rdx, 99\n"
                         "        syscall\n"
-                        "        mov rax, 1\n"
-                        "        mov rdi, 1\n"
-                        "        mov rsi, exitMsg\n"
-                        "        mov rdx, 32\n"
-                        "        syscall\n"
-                        "        mov rax, 60\n"
-                        "        mov rdi, 1\n"
-                        "        syscall\n";
+                        "        call exitError\n";
 
             // r12 = Integer Value
             // Overwrites: rax, rbx, rcx, rdx, rsi, r14
@@ -845,6 +886,181 @@ class Generator{
                         "        jmp intToStringFillString\n"
                         "    intToStringDoneFilling:\n"
                         "        ret\n";
+
+            // Overwrites: rax
+            // Returns: rax = String Address
+            m_output << "\nreadRawChar:\n"
+                        "    cmp [unReadFlag], 1\n"
+                        "    jne readRaw\n"
+                        "    movzx rax, byte [readBuffer]\n"
+                        "    mov [unReadFlag], 0\n"
+                        "    ret\n"
+                        "    readRaw:\n"
+                        "        mov rax, 0\n"
+                        "        mov rdi, 0\n"
+                        "        mov rsi, readBuffer\n"
+                        "        mov rdx, 1\n"
+                        "        syscall\n"
+                        "        cmp rax, 0\n"
+                        "        je endOfFile\n"
+                        "        movzx rax, byte [readBuffer]\n"
+                        "        ret\n"
+                        "    endOfFile:\n"
+                        "        mov rax, 1\n"
+                        "        mov rdi, 1\n"
+                        "        mov rsi, endOfFileMsg\n"
+                        "        mov rdx, 45\n"
+                        "        syscall\n"
+                        "        call exitError\n";
+
+            m_output << "\nreadInt:\n"
+                        "    call readRawChar\n"
+                        "    call unReadChar\n"
+                        "    mov r15, 0\n"
+                        "    mov r14, 0\n"
+                        "    call readRawChar\n"
+                        "    cmp rax, " << ASCII_MINUS << "\n"
+                        "    jne readIntIsPositive\n"
+                        "    mov r15, 1\n"
+                        "    jmp readIntLoop\n"
+                        "    readIntIsPositive:\n"
+                        "        call unReadChar\n"
+                        "    readIntLoop:\n"
+                        "        call readRawChar\n"
+                        "        cmp rax, " << ASCII_ZERO << "\n"
+                        "        jl doneReadingInt\n"
+                        "        cmp rax, " << ASCII_NINE << "\n"
+                        "        jg doneReadingInt\n"
+                        "        push rax\n"
+                        "        add r14, 1\n"
+                        "        jmp readIntLoop\n"
+                        "    doneReadingInt:\n"
+                        "        call isWhiteSpace\n"
+                        "        cmp rbx, 1\n"
+                        "        je setUpCalculations\n"
+                        "        call unReadChar\n"
+                        "    setUpCalculations:\n"
+                        "        mov rax, 0\n"
+                        "        mov r9, 1\n"
+                        "    calculateInt:\n"
+                        "        cmp r14, 0\n"
+                        "        jle doneProcessingInt\n"
+                        "        pop r10\n"
+                        "        sub r10, " << ASCII_ZERO << "\n"
+                        "        imul r10, r9\n"
+                        "        add rax, r10\n"
+                        "        imul r9, 10\n"
+                        "        sub r14, 1\n"
+                        "        jmp calculateInt\n"
+                        "    doneProcessingInt:\n"
+                        "        cmp r15, 1\n"
+                        "        jne returnIntInput\n"
+                        "        imul rax, -1\n"
+                        "    returnIntInput:\n"
+                        "        ret\n";
+
+
+            // Overwrites: rax, rbx, rdx, rdi, rsi, readBuffer
+            // Returns: rax = Character Value
+            m_output << "\nreadChar:\n"
+                        "    readCharLoop:\n"
+                        "        call readRawChar\n"
+                        "        call isWhiteSpace\n"
+                        "        cmp rbx, 1\n"
+                        "        je readCharLoop\n"
+                        "    ret\n";
+
+            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12
+            // Returns: rax = String Address
+            m_output << "\nreadNext:\n"
+                        "    call readChar\n"
+                        "    call unReadChar\n"
+                        "    mov r12, 0\n"
+                        "    readNextLoop:\n"
+                        "        call readRawChar\n"
+                        "        call isWhiteSpace\n"
+                        "        cmp rbx, 1\n"
+                        "        je doneReadingWord\n"
+                        "        push rax\n"
+                        "        add r12, 1\n"
+                        "        jmp readNextLoop\n"
+                        "    doneReadingWord:\n"
+                        "        mov rsi, r12\n"
+                        "        add rsi, 1\n"
+                        "        imul rsi, 8\n"
+                        "        call allocateMemory\n"
+                        "        mov [rax], r12\n"
+                        "        mov rcx, r12\n"
+                        "        imul rcx, 8\n"
+                        "        fillWordLoop:\n"
+                        "            cmp rcx, 0\n"
+                        "            jle doneProcessingWord\n"
+                        "            pop rbx\n"
+                        "            mov [rax + rcx], rbx\n"
+                        "            sub rcx, 8\n"
+                        "            jmp fillWordLoop\n"
+                        "        doneProcessingWord:\n"
+                        "            ret\n";
+
+            // Overwrites: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r12
+            // Returns: rax = String Address
+            m_output << "\nreadLine:\n"
+                        "    removeStartingNewLines:\n"
+                        "        call readRawChar\n"
+                        "        cmp rax, " << ASCII_NEWLINE << "\n"
+                        "        je removeStartingNewLines\n"
+                        "    call unReadChar\n"
+                        "    mov r12, 0\n"
+                        "    readLineLoop:\n"
+                        "        call readRawChar\n"
+                        "        cmp rax, " << ASCII_NEWLINE << "\n"
+                        "        je doneReadingLine\n"
+                        "        push rax\n"
+                        "        add r12, 1\n"
+                        "        jmp readLineLoop\n"
+                        "    doneReadingLine:\n"
+                        "        mov rsi, r12\n"
+                        "        add rsi, 1\n"
+                        "        imul rsi, 8\n"
+                        "        call allocateMemory\n"
+                        "        mov [rax], r12\n"
+                        "        mov rcx, r12\n"
+                        "        imul rcx, 8\n"
+                        "        fillLineLoop:\n"
+                        "            cmp rcx, 0\n"
+                        "            jle doneProcessingLine\n"
+                        "            pop rbx\n"
+                        "            mov [rax + rcx], rbx\n"
+                        "            sub rcx, 8\n"
+                        "            jmp fillLineLoop\n"
+                        "        doneProcessingLine:\n"
+                        "            ret\n";
+
+            m_output << "\nunReadChar:\n"
+                        "    mov [unReadFlag], 1\n"
+                        "    ret\n";
+
+            // rax = Character Value
+            // Overwrites: rbx
+            // Returns: rbx = Boolean Result
+            m_output << "\nisWhiteSpace:\n"
+                        "    cmp rax, " << ASCII_TAB << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    cmp rax, " << ASCII_NEWLINE << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    cmp rax, " << ASCII_VERTICAL_TAB << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    cmp rax, " << ASCII_FORM_FEED << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    cmp rax, " << ASCII_CARRIAGE_RETURN << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    cmp rax, " << ASCII_SPACE << "\n"
+                        "    je whiteSpaceFound\n"
+                        "    mov rbx, 0\n"
+                        "    ret\n"
+                        "    whiteSpaceFound:\n"
+                        "        mov rbx, 1\n"
+                        "        ret\n";
         }
 
     private:
@@ -879,9 +1095,7 @@ class Generator{
         }
 
         void boundVariable(DataType type) {
-            if(type == DataType::Boolean) {
-                m_output << "    call boundBool\n";
-            }
+            if(type == DataType::Boolean) m_output << "    call boundBool\n";
         }
 
         struct Variable{
@@ -899,6 +1113,13 @@ class Generator{
 
         static constexpr int VAR_SIZE = 8;
         static constexpr int ASCII_ZERO = 48;
+        static constexpr int ASCII_ONE = 49;
         static constexpr int ASCII_NINE = 57;
         static constexpr int ASCII_MINUS = 45;
+        static constexpr int ASCII_TAB = 9;
+        static constexpr int ASCII_NEWLINE = 10;
+        static constexpr int ASCII_VERTICAL_TAB = 11;
+        static constexpr int ASCII_FORM_FEED = 12;
+        static constexpr int ASCII_CARRIAGE_RETURN = 13;
+        static constexpr int ASCII_SPACE = 32;
 };

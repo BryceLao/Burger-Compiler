@@ -47,7 +47,12 @@ enum class TokenType {
     size,
     length,
     toString,
-    stoi
+    stoi,
+    readInt,
+    readBool,
+    readChar,
+    readNext,
+    readLine
 };
 
 enum class DataType {
@@ -103,6 +108,31 @@ GroupType getGroupType(DataType dataType) {
             return GroupType::Strings;
         default:
             return GroupType::None;
+    }
+}
+
+std::optional<int> getPrecedenceLevel(TokenType type) {
+    switch (type) {
+        case TokenType::orOperator:
+            return 0;
+        case TokenType::andOperator:
+            return 1;
+        case TokenType::equalTo:
+        case TokenType::notEqualTo:
+        case TokenType::lessThan:
+        case TokenType::lessThanOrEqual:
+        case TokenType::greaterThan:
+        case TokenType::greaterThanOrEqual:
+            return 3;
+        case TokenType::addition:
+        case TokenType::subtraction:
+            return 4;
+        case TokenType::multiplication:
+        case TokenType::division:
+        case TokenType::modulo:
+            return 5;
+        default:
+            return {};
     }
 }
 
@@ -206,6 +236,20 @@ std::string tokenToString(TokenType type) {
             return "size";
         case TokenType::length:
             return "size";
+        case TokenType::toString:
+            return "toString()";
+        case TokenType::stoi:
+            return "stoi()";
+        case TokenType::readInt:
+            return "readInt()";
+        case TokenType::readBool:
+            return "readBool()";
+        case TokenType::readChar:
+            return "readChar()";
+        case TokenType::readNext:
+            return "readNext()";
+        case TokenType::readLine:
+            return "readLine()";
         default:
             return "";
     }

@@ -27,6 +27,11 @@ struct PropertyTerm {
     TokenType property;
 };
 
+struct InputTerm {
+    TokenType readType;
+    std::optional<ExpressionNode*> inputMessage;
+};
+
 struct TypeCastTerm {
     TokenType typeCast;
     ExpressionNode* expression;
@@ -50,7 +55,7 @@ struct ParenthesisTerm {
 struct TermExpressionNode {
     DataType type;
     int lineNumber;
-    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, PropertyTerm*, TypeCastTerm*, UnaryOperationExpression*, ParenthesisTerm*> variant;
+    std::variant<LiteralTerm*,IdentifierTerm*, IndexedTerm*, PropertyTerm*, InputTerm*, TypeCastTerm*, UnaryOperationExpression*, ParenthesisTerm*> variant;
 };
 
 struct ExpressionNode {
@@ -281,6 +286,47 @@ class Parser {
                 termExpression->variant = typeCastTerm;
                 termExpression->type = newDataType;
                 termExpression->lineNumber = peek(-1).value().lineNumber;
+
+                return termExpression;
+            }
+            else if(tryPeek(TokenType::readInt) || tryPeek(TokenType::readBool) || tryPeek(TokenType::readChar) ||
+                    tryPeek(TokenType::readNext) || tryPeek(TokenType::readLine)) {
+                auto inputTerm = m_ArenaAllocator.allocate<InputTerm>();
+                inputTerm->readType = consume().type;
+
+                if(tryPeek(TokenType::openParenthesis)) consume();
+                else expectedCharacterError(peek(-1).value().lineNumber, '(');
+
+                auto expression = parseExpression();
+
+                if(expression.has_value() && expression.value()->type != DataType::String)
+                    throwError(expression.value()->lineNumber, "Error: Argument of '" + tokenToString(inputTerm->readType) + "' must be type 'string'");
+                inputTerm->inputMessage = expression;
+
+                if(tryPeek(TokenType::closeParenthesis)) consume();
+                else expectedCharacterError(peek(-1).value().lineNumber, ')');
+
+                auto termExpression = m_ArenaAllocator.allocate<TermExpressionNode>();
+                termExpression->variant = inputTerm;
+                termExpression->lineNumber = peek(-1).value().lineNumber;
+
+                switch(inputTerm->readType) {
+                    case TokenType::readInt:
+                        termExpression->type = DataType::Integer;
+                        break;
+                    case TokenType::readBool:
+                        termExpression->type = DataType::Boolean;
+                        break;
+                    case TokenType::readChar:
+                        termExpression->type = DataType::Character;
+                        break;
+                    case TokenType::readNext:
+                    case TokenType::readLine:
+                        termExpression->type = DataType::String;
+                        break;
+                    default:
+                        throwError(termExpression->lineNumber, "Internal compiler error: Unknown method");
+                }
 
                 return termExpression;
             }

@@ -4,32 +4,6 @@
 #include <vector>
 #include "util.hpp"
 
-std::optional<int> getPrecedenceLevel(TokenType type) {
-    switch (type) {
-        case TokenType::orOperator:
-            return 0;
-        case TokenType::andOperator:
-            return 1;
-        case TokenType::equalTo:
-        case TokenType::notEqualTo:
-        case TokenType::lessThan:
-        case TokenType::lessThanOrEqual:
-        case TokenType::greaterThan:
-        case TokenType::greaterThanOrEqual:
-            return 3;
-        case TokenType::addition:
-        case TokenType::subtraction:
-            return 4;
-        case TokenType::multiplication:
-        case TokenType::division:
-        case TokenType::modulo:
-            return 5;
-
-        default:
-            return {};
-    }
-}
-
 struct Token {
     TokenType type;
     int lineNumber;
@@ -146,6 +120,26 @@ class Tokenizer {
                     }
                     else if(buffer == "stoi") {
                         tokens.push_back({.type = TokenType::stoi, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "readInt") {
+                        tokens.push_back({.type = TokenType::readInt, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "readBool") {
+                        tokens.push_back({.type = TokenType::readBool, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "readChar") {
+                        tokens.push_back({.type = TokenType::readChar, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "readNext") {
+                        tokens.push_back({.type = TokenType::readNext, .lineNumber = curLineNumber});
+                        buffer.clear();
+                    }
+                    else if(buffer == "readLine") {
+                        tokens.push_back({.type = TokenType::readLine, .lineNumber = curLineNumber});
                         buffer.clear();
                     }
                     else {
