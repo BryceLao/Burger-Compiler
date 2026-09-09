@@ -179,7 +179,7 @@ namespace Parser {
         if(getGroupType(dataType) == GroupType::Primitive || getGroupType(dataType) == GroupType::Strings) {
             expression = expectExpression(variables);
 
-            if(expression->type != dataType)
+            if(getGroupType(expression->type) != getGroupType(dataType))
                 throwError(lastLine(), "Error: Cannot assign value of type '" + dataTypeToString(expression->type) +
                                        "' to variable '" + identifier.value.value() + "' of type '" + dataTypeToString(dataType) + "'");
         }
@@ -242,7 +242,7 @@ namespace Parser {
 
         expectCharacter(TokenType::semiColon);
 
-        if(variableDataType != expression->type)
+        if(getGroupType(variableDataType) != getGroupType(expression->type))
             throwError(lastLine(), "Error: Cannot assign value of type '" + dataTypeToString(expression->type) +
                                    "' to variable '" + identifier.value.value() + "' of type '" + dataTypeToString(variableDataType) + "'");
 

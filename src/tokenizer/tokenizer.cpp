@@ -130,7 +130,7 @@ namespace Tokenizer {
     void Tokenizer::skipLine() {
         consume(); consume();
 
-        while(peek().has_value() && !tryPeek('\n') || !tryPeek('\r')) {
+        while(!tryPeek('\n') && !tryPeek('\r')) {
             consume();
         }
     }

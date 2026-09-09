@@ -1,0 +1,26 @@
+// Scopes, conditionals, reassignment, and while loops.
+set int count = 0;
+set int total = 0;
+
+while count < 5 {
+    total = total + count;
+
+    if count == 2 {
+        print("middle");
+    } else if count > 2 {
+        print("after middle");
+    } else {
+        print("before middle");
+    }
+
+    count = count + 1;
+}
+
+print(total);
+
+{
+    set string message = "inside scope";
+    print(message);
+}
+
+exit(total);

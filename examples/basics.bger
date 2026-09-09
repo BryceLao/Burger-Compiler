@@ -1,0 +1,28 @@
+// Primitive types, literals, variables, operations, casts, print, and exit.
+set int age = 18;
+set bool student = True;
+set char grade = 'A';
+set string name = "John";
+
+print(name);
+print(age);
+print(student);
+print(grade);
+
+set int arithmetic = 10 + 3 * 2 - 4 / 2 % 3;
+set bool comparisons = age >= 18 and grade == 'A' or not student;
+set string description = name + " is " + toString(age);
+
+print(arithmetic);
+print(comparisons);
+print(description);
+print(int('7'));
+print(bool(1));
+print(char(66));
+print(stoi("123"));
+
+if comparisons {
+    print("condition true");
+}
+
+exit(0);

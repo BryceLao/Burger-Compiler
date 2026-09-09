@@ -134,6 +134,12 @@ namespace Generator {
     void Generator::generateExit(const Parser::ExitNode* exitNode, VarMap &variables) {
         generateExpression(exitNode->expression, variables);
 
+        m_output << "    mov rax, 1\n"
+                    "    mov rdi, 1\n"
+                    "    mov rsi, exitMsg\n"
+                    "    mov rdx, 32\n"
+                    "    syscall\n";
+
         m_output << "    mov rax, 60\n";
         pop("rdi");
 
@@ -305,8 +311,12 @@ namespace Generator {
     }
 
     void Generator::generateReturn(const Parser::ReturnNode *returnNode, Generator::VarMap &variables) {
-        generateExpression(returnNode->expression.value(), variables);
-        pop("rcx");
+        m_output << "    mov rcx, 0\n";
+
+        if(returnNode->expression.has_value()) {
+            generateExpression(returnNode->expression.value(), variables);
+            pop("rcx");
+        }
 
         m_output << "    mov rbx, [stackPointerIndex]\n"
                     "    sub rbx, 1\n"
@@ -334,9 +344,9 @@ namespace Generator {
 
         m_output << "    mov rax, [stackPointerIndex]\n"
                     "    mov [stackPointers + rax * " << VAR_SIZE << "], rsp\n"
-                                                                     "    sub [stackPointers + rax * " << VAR_SIZE << "], " << VAR_SIZE << "\n"
-                                                                                                                                           "    add rax, 1\n"
-                                                                                                                                           "    mov [stackPointerIndex], rax\n";
+                    "    sub [stackPointers + rax * " << VAR_SIZE << "], " << VAR_SIZE << "\n"
+                    "    add rax, 1\n"
+                    "    mov [stackPointerIndex], rax\n";
 
         m_output << "    call func_" << functionCall->identifier.value.value() << "\n";
     }
@@ -638,7 +648,7 @@ namespace Generator {
                         m_output << "    mov rsi, r13\n"
                                     "    add rsi, 1\n"
                                     "    imul rsi, " << VAR_SIZE << "\n"
-                                                                    "    call allocateMemory\n";
+                                    "    call allocateMemory\n";
 
                         m_output << "    mov [rax], r13\n";
 
@@ -648,10 +658,10 @@ namespace Generator {
                         m_output << "    mov r8, rax\n"
                                     "    mov rbx, [r12]\n"
                                     "    imul rbx, " << VAR_SIZE << "\n"
-                                                                    "    add rax, rbx\n"
-                                                                    "    mov r12, r15\n"
-                                                                    "    call fillMemory\n"
-                                                                    "    mov rax, r8\n";
+                                    "    add rax, rbx\n"
+                                    "    mov r12, r15\n"
+                                    "    call fillMemory\n"
+                                    "    mov rax, r8\n";
                         break;
                     case TokenType::equalTo:
                         m_output << "    call cmpStringEq\n";
@@ -683,10 +693,11 @@ namespace Generator {
 
     void Generator::generateData() {
         m_output << "section .bss\n"
-                    "    readBuffer resb 1\n"
-                    "    unReadFlag resb 1\n"
+                    "    align 8\n"
+                    "    readBuffer resq 1\n"
+                    "    unReadFlag resq 1\n"
                     "    stackPointers resq 256\n"
-                    "    stackPointerIndex resb 1\n";
+                    "    stackPointerIndex resq 1\n";
 
         m_output << "\nsection .data\n"
                     "    exitMsg db \"Process finished with exit code \"\n"
@@ -766,7 +777,15 @@ namespace Generator {
 
             generateScope(functionNode->statements, variables);
 
-            if(functionNode->returnType == DataType::Void) m_output << "    ret\n";
+            if(functionNode->returnType == DataType::Void) {
+                m_output << "    mov rbx, [stackPointerIndex]\n"
+                            "    sub rbx, 1\n"
+                            "    mov rsp, [stackPointers + rbx * " << VAR_SIZE << "]\n"
+                            "    mov [stackPointerIndex], rbx\n";
+
+                m_output << "    mov rax, rcx\n"
+                            "    ret\n";
+            }
             else m_output << "    jmp missingReturn\n";
         }
     }
@@ -825,7 +844,7 @@ namespace Generator {
         m_output << "\nreadRawChar:\n"
                     "    cmp [unReadFlag], 1\n"
                     "    jne readRaw\n"
-                    "    movzx rax, byte [readBuffer]\n"
+                    "    mov rax, [readBuffer]\n"
                     "    mov [unReadFlag], 0\n"
                     "    ret\n"
                     "    readRaw:\n"
@@ -836,7 +855,7 @@ namespace Generator {
                     "        syscall\n"
                     "        cmp rax, 0\n"
                     "        je endOfFile\n"
-                    "        movzx rax, byte [readBuffer]\n"
+                    "        mov rax, [readBuffer]\n"
                     "        ret\n"
                     "    endOfFile:\n"
                     "        mov rax, 1\n"

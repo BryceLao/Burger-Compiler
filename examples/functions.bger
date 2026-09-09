@@ -1,0 +1,28 @@
+// Value-returning functions, void functions, recursion, and call expressions.
+define int factorial(int n) {
+    if n <= 1 {
+        return 1;
+    }
+    return n * call factorial(n - 1);
+}
+
+define int add(int left, int right) {
+    return left + right;
+}
+
+define void announce() {
+    print("Hello from a void function");
+}
+
+define void printNumber(int value) {
+    print(value);
+}
+
+set int result = call factorial(5);
+print(result);
+print(call add(2, 3));
+
+call announce();
+call printNumber(result);
+
+exit(result);

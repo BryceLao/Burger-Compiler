@@ -1,0 +1,36 @@
+// Arrays, indexing, properties, strings, and input terms.
+set int[] numbers = new Array[3];
+numbers[0] = 10;
+numbers[1] = 20;
+numbers[2] = 30;
+
+print(numbers[1]);
+print(numbers.size());
+
+set bool[] flags = new Array[2];
+flags[0] = True;
+flags[1] = False;
+print(flags[0]);
+
+set char[] letters = new Array[2];
+letters[0] = 'A';
+letters[1] = 'B';
+print(letters[1]);
+
+set string text = "hello";
+print(text.length());
+print(text + " world");
+
+set int number = readInt("Enter an integer: ");
+set bool answer = readBool("Enter True or False: ");
+set char symbol = readChar("Enter a character: ");
+set string word = readNext("Enter a word: ");
+set string line = readLine("Enter a line: ");
+
+print(number);
+print(answer);
+print(symbol);
+print(word);
+print(line);
+
+exit(0);
