@@ -4,9 +4,9 @@
 #include <optional>
 #include <vector>
 
-#include "./tokenizer.hpp"
-#include "./parser.hpp"
-#include "./generator.hpp"
+#include "tokenizer/tokenizer.hpp"
+#include "parser/parser.hpp"
+#include "generator/generator.hpp"
 
 int main(int argc, char* argv[]) {
 
@@ -24,14 +24,14 @@ int main(int argc, char* argv[]) {
         contents = contentStream.str();
     }
 
-    Tokenizer tokenizer(contents);
-    std::vector<Token> tokens = tokenizer.tokenize();
+    Tokenizer::Tokenizer tokenizer(contents);
+    std::vector<Tokenizer::Token> tokens = tokenizer.tokenize();
 
-    Parser parser(std::move(tokens));
+    Parser::Parser parser(std::move(tokens));
 
-    std::optional<ProgramNode> program = parser.parseProgram();
+    Parser::ProgramNode program = parser.parseProgram();
 
-    Generator generator(program.value());
+    Generator::Generator generator(program);
     {
         std::fstream file("out.asm", std::ios::out);
         file << generator.generateProgram();
