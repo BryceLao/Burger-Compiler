@@ -31,7 +31,7 @@ namespace Generator {
         }
     }
 
-    void Generator::generateStatement(Parser::StatementNode* statement, VarMap &variables) {
+    void Generator::generateStatement(Parser::StatementNode* statement, VarMap& variables) {
         struct StatementVisitor {
             Generator* generator;
             VarMap& variables;
@@ -73,7 +73,7 @@ namespace Generator {
         std::visit(visitor, statement->variant);
     }
 
-    void Generator::generateExpression(const Parser::ExpressionNode *expression, VarMap &variables) {
+    void Generator::generateExpression(const Parser::ExpressionNode* expression, VarMap& variables) {
         struct ExpressionVisitor {
             Generator* generator;
             const Parser::ExpressionNode* expression;
@@ -91,7 +91,7 @@ namespace Generator {
         std::visit(visitor, expression->variant);
     }
 
-    void Generator::generateTerm(Parser::TermExpressionNode *term, VarMap &variables) {
+    void Generator::generateTerm(Parser::TermExpressionNode* term, VarMap& variables) {
         struct TermVisitor {
             Generator* generator;
             VarMap& variables;
@@ -99,6 +99,9 @@ namespace Generator {
 
             void operator()(const Parser::LiteralTerm* literalTerm) const {
                 generator->generateLiteral(literalTerm);
+            }
+            void operator()(const Parser::ArrayConstructorTerm* arrayConstructor) const {
+                generator->generateArrayConstructor(arrayConstructor, variables);
             }
             void operator()(const Parser::IdentifierTerm* identifierTerm) const {
                 generator->generateIdentifier(identifierTerm, variables, term->lineNumber);
@@ -131,22 +134,27 @@ namespace Generator {
         std::visit(visitor, term->variant);
     }
 
-    void Generator::generateExit(const Parser::ExitNode* exitNode, VarMap &variables) {
-        generateExpression(exitNode->expression, variables);
-
+    void Generator::generateExit(const Parser::ExitNode* exitNode, VarMap& variables) {
         m_output << "    mov rax, 1\n"
                     "    mov rdi, 1\n"
                     "    mov rsi, exitMsg\n"
                     "    mov rdx, 32\n"
                     "    syscall\n";
 
-        m_output << "    mov rax, 60\n";
-        pop("rdi");
+        generateExpression(exitNode->expression, variables);
+        pop("r12");
+        m_output << "    call intToString\n"
+                    "    mov r8, rax\n"
+                    "    call printString\n"
+                    "    call printNewLine\n";
+
+        m_output << "    mov rax, 60\n"
+                    "    mov rdi, 0\n";
 
         m_output << "    syscall\n";
     }
 
-    void Generator::generatePrint(const Parser::PrintNode *printNode, VarMap &variables) {
+    void Generator::generatePrint(const Parser::PrintNode* printNode, VarMap& variables) {
         generateExpression(printNode->expression, variables);
 
         switch(printNode->expression->type) {
@@ -175,18 +183,13 @@ namespace Generator {
         m_output << "    call printNewLine\n";
     }
 
-    void Generator::generateVariableDeclaration(const Parser::DeclarationNode *declarationNode, VarMap &variables, int lineNumber) {
+    void Generator::generateVariableDeclaration(const Parser::DeclarationNode* declarationNode, VarMap& variables, int lineNumber) {
         if(variables.find(declarationNode->identifier.value.value()) != variables.end())
             throwError(lineNumber, "Error: Redefinition of variable '" + declarationNode->identifier.value.value() + "'");
 
         generateExpression(declarationNode->expression, variables);
 
-        if(getGroupType(declarationNode->type) == GroupType::Primitive) {
-            pop("rax");
-
-            if(declarationNode->type == DataType::Boolean) m_output << "    call boundBool\n";
-        }
-        else if(getGroupType(declarationNode->type) == GroupType::Strings) {
+        if(getGroupType(declarationNode->type) == GroupType::Strings) {
             pop("r12");
 
             m_output << "    mov rsi, [r12]\n"
@@ -198,20 +201,10 @@ namespace Generator {
                         "    mov [rax], rdx\n"
                         "    call fillMemory\n";
         }
-        else if(getGroupType(declarationNode->type) == GroupType::Arrays) {
-            pop("rsi");
+        else {
+            pop("rax");
 
-            m_output << "    cmp rsi, 0\n"
-                        "    jle invalidArraySize\n";
-
-            m_output << "    mov r12, rsi\n";
-
-            m_output << "    add rsi, 1\n"
-                        "    imul rsi, " << VAR_SIZE << "\n";
-
-            m_output << "    call allocateMemory\n";
-
-            m_output << "    mov [rax], r12\n";
+            if(declarationNode->type == DataType::Boolean) m_output << "    call boundBool\n";
         }
 
         push("rax");
@@ -219,7 +212,7 @@ namespace Generator {
                           Variable {.scopeDepth = m_scopeDepth, .stackLocation = m_stackSize, .type = declarationNode->type}});
     }
 
-    void Generator::generateReAssignment(const Parser::ReAssignmentNode *reAssignmentNode, VarMap &variables, int lineNumber) {
+    void Generator::generateReAssignment(const Parser::ReAssignmentNode* reAssignmentNode, VarMap& variables, int lineNumber) {
         if(variables.find(reAssignmentNode->identifier.value.value()) == variables.end())
             throwError(lineNumber, "Error: Use of undeclared variable '" + reAssignmentNode->identifier.value.value() + "'");
 
@@ -257,11 +250,11 @@ namespace Generator {
         }
     }
 
-    void Generator::generateScopeStatement(const Parser::ScopeNode *scopeNode, Generator::VarMap &variables) {
+    void Generator::generateScopeStatement(const Parser::ScopeNode* scopeNode, Generator::VarMap& variables) {
         generateScope(scopeNode->statements, variables);
     }
 
-    void Generator::generateConditional(const Parser::ConditionalNode *conditionalNode, Generator::VarMap &variables) {
+    void Generator::generateConditional(const Parser::ConditionalNode* conditionalNode, Generator::VarMap& variables) {
         int endLabel = m_curLabelCount++;
 
         for (int i = 0; i < conditionalNode->statements.size(); ++i) {
@@ -289,7 +282,7 @@ namespace Generator {
         m_output << "b" << endLabel << ":\n";
     }
 
-    void Generator::generateLoop(const Parser::LoopNode *loopNode, Generator::VarMap &variables) {
+    void Generator::generateLoop(const Parser::LoopNode* loopNode, Generator::VarMap& variables) {
         int statementLabel = m_curLabelCount++;
         int conditionLabel = m_curLabelCount++;
 
@@ -310,7 +303,7 @@ namespace Generator {
         m_functionNodes.push_back(functionNode);
     }
 
-    void Generator::generateReturn(const Parser::ReturnNode *returnNode, Generator::VarMap &variables) {
+    void Generator::generateReturn(const Parser::ReturnNode* returnNode, Generator::VarMap& variables) {
         m_output << "    mov rcx, 0\n";
 
         if(returnNode->expression.has_value()) {
@@ -327,7 +320,7 @@ namespace Generator {
                     "    ret\n";
     }
 
-    void Generator::generateFunctionCall(const Parser::FunctionCall* functionCall, Generator::VarMap &variables) {
+    void Generator::generateFunctionCall(const Parser::FunctionCall* functionCall, Generator::VarMap& variables) {
         int curOffset = 0;
 
         m_output << "    mov rsi, " << functionCall->arguments.size() * VAR_SIZE << "\n"
@@ -351,7 +344,7 @@ namespace Generator {
         m_output << "    call func_" << functionCall->identifier.value.value() << "\n";
     }
 
-    void Generator::generateScope(std::vector<Parser::StatementNode *> statements, Generator::VarMap &variables) {
+    void Generator::generateScope(std::vector<Parser::StatementNode*> statements, Generator::VarMap& variables) {
         int curStackSize = m_stackSize;
         int curScopeDepth = m_scopeDepth++;
 
@@ -371,11 +364,11 @@ namespace Generator {
         m_scopeDepth--;
     }
 
-    void Generator::generateTermExpression(Parser::TermExpressionNode *termExpression, Generator::VarMap &variables) {
+    void Generator::generateTermExpression(Parser::TermExpressionNode* termExpression, Generator::VarMap& variables) {
         generateTerm(termExpression, variables);
     }
 
-    void Generator::generateOperationExpression(const Parser::OperationExpressionNode *operationExpression, Generator::VarMap &variables, DataType resultantType) {
+    void Generator::generateOperationExpression(const Parser::OperationExpressionNode* operationExpression, Generator::VarMap& variables, DataType resultantType) {
         generateExpression(operationExpression->left, variables);
         generateExpression(operationExpression->right, variables);
 
@@ -394,7 +387,7 @@ namespace Generator {
         push("rax");
     }
 
-    void Generator::generateLiteral(const Parser::LiteralTerm *literalTerm) {
+    void Generator::generateLiteral(const Parser::LiteralTerm* literalTerm) {
         if(literalTerm->literal.type == TokenType::stringLiteral) {
             int length = literalTerm->literal.value.value().length();
 
@@ -413,7 +406,7 @@ namespace Generator {
         push("rax");
     }
 
-    void Generator::generateIdentifier(const Parser::IdentifierTerm *identifierTerm, Generator::VarMap &variables, int lineNumber) {
+    void Generator::generateIdentifier(const Parser::IdentifierTerm* identifierTerm, Generator::VarMap& variables, int lineNumber) {
         if(variables.find(identifierTerm->identifier.value.value()) == variables.end())
             throwError(lineNumber, "Error: Use of undeclared variable '" + identifierTerm->identifier.value.value() + "'");
 
@@ -421,7 +414,25 @@ namespace Generator {
         push("[rsp + " + std::to_string((m_stackSize - stackLocation) * VAR_SIZE) + "]");
     }
 
-    void Generator::generateIndexedTerm(const Parser::IndexedTerm *indexedTerm, Generator::VarMap &variables, int lineNumber) {
+    void Generator::generateArrayConstructor(const Parser::ArrayConstructorTerm* arrayConstructor, Generator::VarMap& variables) {
+        generateExpression(arrayConstructor->size, variables);
+        pop("rsi");
+
+        m_output << "    cmp rsi, 0\n"
+                    "    jle invalidArraySize\n";
+
+        m_output << "    mov r12, rsi\n";
+
+        m_output << "    add rsi, 1\n"
+                    "    imul rsi, " << VAR_SIZE << "\n";
+
+        m_output << "    call allocateMemory\n";
+
+        m_output << "    mov [rax], r12\n";
+        push("rax");
+    }
+
+    void Generator::generateIndexedTerm(const Parser::IndexedTerm* indexedTerm, Generator::VarMap& variables, int lineNumber) {
         if(variables.find(indexedTerm->identifier.value.value()) == variables.end())
             throwError(lineNumber, "Error: Use of undeclared variable '" + indexedTerm->identifier.value.value() + "'");
 
@@ -446,7 +457,7 @@ namespace Generator {
         push("rax");
     }
 
-    void Generator::generateProperty(const Parser::PropertyTerm *propertyTerm, Generator::VarMap &variables, int lineNumber) {
+    void Generator::generateProperty(const Parser::PropertyTerm* propertyTerm, Generator::VarMap& variables, int lineNumber) {
         if(variables.find(propertyTerm->identifier.value.value()) == variables.end())
             throwError(lineNumber, "Error: Use of undeclared variable '" + propertyTerm->identifier.value.value() + "'");
 
@@ -459,7 +470,7 @@ namespace Generator {
         }
     }
 
-    void Generator::generateTypeCast(const Parser::TypeCastTerm *typeCastTerm, Generator::VarMap &variables) {
+    void Generator::generateTypeCast(const Parser::TypeCastTerm* typeCastTerm, Generator::VarMap& variables) {
         generateExpression(typeCastTerm->expression, variables);
 
         switch(typeCastTerm->typeCast) {
@@ -501,7 +512,7 @@ namespace Generator {
         }
     }
 
-    void Generator::generateReadInput(const Parser::InputTerm *inputTerm, Generator::VarMap &variables) {
+    void Generator::generateReadInput(const Parser::InputTerm* inputTerm, Generator::VarMap& variables) {
         if(inputTerm->inputMessage.has_value()) {
             generateExpression(inputTerm->inputMessage.value(), variables);
             pop("r8");
@@ -530,11 +541,11 @@ namespace Generator {
         push("rax");
     }
 
-    void Generator::generateParenthesisTerm(const Parser::ParenthesisTerm *parenthesisTerm, Generator::VarMap &variables) {
+    void Generator::generateParenthesisTerm(const Parser::ParenthesisTerm* parenthesisTerm, Generator::VarMap& variables) {
         generateExpression(parenthesisTerm->expression, variables);
     }
 
-    void Generator::generateUnaryExpression(const Parser::UnaryExpressionTerm *unaryTerm, Generator::VarMap &variables) {
+    void Generator::generateUnaryExpression(const Parser::UnaryExpressionTerm* unaryTerm, Generator::VarMap& variables) {
         generateExpression(unaryTerm->expression, variables);
         pop("rax");
 
@@ -723,6 +734,12 @@ namespace Generator {
                     "    mov rdx, 32\n"
                     "    syscall\n";
 
+        m_output << "    mov r12, 0\n"
+                    "    call intToString\n"
+                    "    mov r8, rax\n"
+                    "    call printString\n"
+                    "    call printNewLine\n";
+
         m_output << "    mov rax, 60\n"
                     "    mov rdi, 0\n"
                     "    syscall\n";
@@ -799,6 +816,11 @@ namespace Generator {
                     "    mov rsi, exitMsg\n"
                     "    mov rdx, 32\n"
                     "    syscall\n"
+                    "    mov r12, 1\n"
+                    "    call intToString\n"
+                    "    mov r8, rax\n"
+                    "    call printString\n"
+                    "    call printNewLine\n"
                     "    mov rax, 60\n"
                     "    mov rdi, 1\n"
                     "    syscall\n";
@@ -1276,12 +1298,12 @@ namespace Generator {
                     "        ret\n";
     }
 
-    void Generator::push(const std::string &reg) {
+    void Generator::push(const std::string& reg) {
         m_output << "    push " << reg << "\n";
         m_stackSize++;
     }
 
-    void Generator::pop(const std::string &reg) {
+    void Generator::pop(const std::string& reg) {
         m_output << "    pop " << reg << "\n";
         m_stackSize--;
     }

@@ -65,6 +65,7 @@ namespace Generator {
             void generateTerm(Parser::TermExpressionNode* term, VarMap& variables);
 
             void generateLiteral(const Parser::LiteralTerm* literalTerm);
+            void generateArrayConstructor(const Parser::ArrayConstructorTerm* arrayConstructor, VarMap& variables);
             void generateIdentifier(const Parser::IdentifierTerm* identifierTerm, VarMap& variables, int lineNumber);
             void generateIndexedTerm(const Parser::IndexedTerm* indexedTerm, VarMap& variables, int lineNumber);
             void generateProperty(const Parser::PropertyTerm* propertyTerm, VarMap& variables, int lineNumber);

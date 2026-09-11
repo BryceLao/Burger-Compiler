@@ -65,10 +65,14 @@ namespace Parser {
         ExpressionNode* expression;
     };
 
+    struct ArrayConstructorTerm {
+        ExpressionNode* size;
+    };
+
     struct TermExpressionNode {
         Util::DataType type;
         int lineNumber;
-        std::variant<LiteralTerm*, IdentifierTerm*, IndexedTerm*, PropertyTerm*, InputTerm*, TypeCastTerm*, UnaryExpressionTerm*, ParenthesisTerm*, FunctionCall*> variant;
+        std::variant<LiteralTerm*, ArrayConstructorTerm*, IdentifierTerm*, IndexedTerm*, PropertyTerm*, InputTerm*, TypeCastTerm*, UnaryExpressionTerm*, ParenthesisTerm*, FunctionCall*> variant;
     };
 
     struct ExpressionNode {

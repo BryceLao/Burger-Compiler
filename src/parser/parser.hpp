@@ -114,6 +114,7 @@ namespace Parser {
             std::optional<TermExpressionNode*> parseTerm(VarMap& variables, int minimumPrecedence = 0);
 
             TermExpressionNode* parseLiteral();
+            TermExpressionNode* parseArrayConstructorTerm(VarMap& variables);
             TermExpressionNode* parseIdentifier(VarMap& variables);
             TermExpressionNode* parseTypeCast(VarMap& variables);
             TermExpressionNode* parseReadInput(VarMap& variables);

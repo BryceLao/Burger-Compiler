@@ -95,6 +95,8 @@ namespace Parser {
             case TokenType::charLiteral:
             case TokenType::stringLiteral:
                 return parseLiteral();
+            case TokenType::newKeyword:
+                return parseArrayConstructorTerm(variables);
             case TokenType::identifier:
                 return parseIdentifier(variables);
             case TokenType::intType:
@@ -176,24 +178,11 @@ namespace Parser {
 
         expectCharacter(TokenType::assignment);
 
-        if(getGroupType(dataType) == GroupType::Primitive || getGroupType(dataType) == GroupType::Strings) {
-            expression = expectExpression(variables);
+        expression = expectExpression(variables);
 
-            if(getGroupType(expression->type) != getGroupType(dataType))
-                throwError(lastLine(), "Error: Cannot assign value of type '" + dataTypeToString(expression->type) +
-                                       "' to variable '" + identifier.value.value() + "' of type '" + dataTypeToString(dataType) + "'");
-        }
-        else {
-            expectCharacter(TokenType::newKeyword);
-            expectCharacter(TokenType::arrayType);
-            expectCharacter(TokenType::openBracket);
-
-            expression = expectExpression(variables);
-            if(getGroupType(expression->type) != GroupType::Primitive)
-                throwError(lastLine(), "Error: Array size must be an integer, boolean, or character");
-
-            expectCharacter(TokenType::closeBracket);
-        }
+        if(getGroupType(expression->type) != getGroupType(dataType))
+            throwError(lastLine(), "Error: Cannot assign value of type '" + dataTypeToString(expression->type) +
+                                   "' to variable '" + identifier.value.value() + "' of type '" + dataTypeToString(dataType) + "'");
 
         expectCharacter(TokenType::semiColon);
 
@@ -304,7 +293,7 @@ namespace Parser {
         return makeStatementNode(conditionalNode, lastLine());
     }
 
-    StatementNode* Parser::parseLoop(VarMap &variables, std::string_view curFunction) {
+    StatementNode* Parser::parseLoop(VarMap& variables, std::string_view curFunction) {
         ExpressionNode* condition;
         std::vector<StatementNode*> statements;
 
@@ -480,6 +469,25 @@ namespace Parser {
         literalExpression->literal = literal;
 
         return makeTermNode(literalExpression, dataType, lastLine());
+    }
+
+    TermExpressionNode* Parser::parseArrayConstructorTerm(VarMap& variables) {
+        ExpressionNode* size;
+
+        expectCharacter(TokenType::newKeyword);
+        expectCharacter(TokenType::arrayType);
+        expectCharacter(TokenType::openBracket);
+
+        size = expectExpression(variables);
+        if(getGroupType(size->type) != GroupType::Primitive)
+            throwError(lastLine(), "Error: Array size must be an integer, boolean, or character");
+
+        expectCharacter(TokenType::closeBracket);
+
+        auto arrayConstructor = m_ArenaAllocator.allocate<ArrayConstructorTerm>();
+        arrayConstructor->size = size;
+
+        return makeTermNode(arrayConstructor, DataType::IntArray, lastLine());
     }
 
     TermExpressionNode* Parser::parseIdentifier(VarMap& variables) {
@@ -686,7 +694,7 @@ namespace Parser {
         return makeTermNode(unaryTerm, resultantType, lastLine());
     }
 
-    FunctionCall* Parser::parseFunctionCall(VarMap &variables) {
+    FunctionCall* Parser::parseFunctionCall(VarMap& variables) {
         Token identifier;
         std::vector<Argument> arguments;
         int argumentCount = 0;
@@ -758,7 +766,7 @@ namespace Parser {
         return consume();
     }
 
-    ExpressionNode* Parser::expectExpression(VarMap &variables, int minimumPrecedence) {
+    ExpressionNode* Parser::expectExpression(VarMap& variables, int minimumPrecedence) {
         auto expression = parseExpression(variables, minimumPrecedence);
 
         if(expression.has_value()) return expression.value();

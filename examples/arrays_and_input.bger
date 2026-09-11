@@ -22,7 +22,7 @@ print(text.length());
 print(text + " world");
 
 set int number = readInt("Enter an integer: ");
-set bool answer = readBool("Enter True or False: ");
+set bool answer = readBool("Enter 1/0 (True/False): ");
 set char symbol = readChar("Enter a character: ");
 set string word = readNext("Enter a word: ");
 set string line = readLine("Enter a line: ");
